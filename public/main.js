@@ -32,6 +32,7 @@ let audioContext;
 let currentAudioBuffer = null;
 let currentAudioSource = null; // To keep track of the currently playing source
 let assignedTrack = null;
+let audioContextResumed = false; // Flag to ensure resume only happens once
 
 // --- Service Worker Registration ---
 if ('serviceWorker' in navigator) {
@@ -45,6 +46,28 @@ if ('serviceWorker' in navigator) {
             });
     });
 }
+
+// --- Universal AudioContext Resume on User Gesture ---
+// This function will be called on any user click to unlock audio
+function resumeAudioContext() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended' && !audioContextResumed) {
+        audioContext.resume().then(() => {
+            console.log('AudioContext resumed successfully on user gesture.');
+            audioContextResumed = true; // Set flag to prevent repeated attempts
+            // Remove the listener after successful resume
+            document.body.removeEventListener('click', resumeAudioContext);
+            document.body.removeEventListener('touchstart', resumeAudioContext);
+        }).catch(e => console.error('Error resuming AudioContext:', e));
+    }
+}
+
+// Attach a universal click/touch listener to resume audio context
+document.body.addEventListener('click', resumeAudioContext);
+document.body.addEventListener('touchstart', resumeAudioContext); // For mobile touch events
+
 
 // --- WebSocket Connection ---
 function connectWebSocket() {
@@ -106,9 +129,9 @@ function connectWebSocket() {
     };
 }
 
-// --- Web Audio API Initialization and Loading ---
+// --- Web Audio API Initialization and Loading (Updated to use global audioContext) ---
 async function loadAudio(url) {
-    if (!audioContext) {
+    if (!audioContext) { // Ensure AudioContext is initialized if not already (e.g., if no initial click)
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
     playbackStatusSpan.textContent = 'Loading audio...';
@@ -136,6 +159,7 @@ function playAudio(delay = 0) {
     }
 
     // Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
+    // This is a fallback, primary resume is now on initial document click
     if (audioContext.state === 'suspended') {
         audioContext.resume();
     }
@@ -225,10 +249,8 @@ function handleSlaveCommand(command) {
 
 // --- New: Become Master Button Logic ---
 becomeMasterBtn.addEventListener('click', () => {
-    // This interaction ensures AudioContext is resumed, allowing later programmatic playback
-    if (audioContext && audioContext.state === 'suspended') {
-        audioContext.resume();
-    }
+    // AudioContext resume is now handled by universal document click/touch listener.
+    // This button click is primarily for sending the secret.
 
     const secret = masterSecretInput.value;
     if (secret) {

@@ -41,16 +41,12 @@ wss.on('connection', function connection(ws) {
         if (msg.type === 'attemptMaster') {
             if (msg.secret === MASTER_SECRET) {
                 if (masterClient && masterClient !== ws) {
-                    // If there's already a master and it's not this client,
-                    // demote the old master if possible, or reject.
-                    // For simplicity, let's allow a new connection with secret to take over.
                     console.log('New client provided correct secret. Assigning as new master.');
                     if (masterClient && masterClient.readyState === WebSocket.OPEN) {
                          masterClient.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Master role taken by another client.' }));
                     }
                     masterClient = ws;
                     ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are now the master!' }));
-                    // Inform all other clients that a new master has emerged (optional, but good for UI)
                     wss.clients.forEach(function each(client) {
                         if (client !== ws && client.readyState === WebSocket.OPEN) {
                             client.send(JSON.stringify({ type: 'masterStatusChange', masterPresent: true }));
@@ -67,39 +63,43 @@ wss.on('connection', function connection(ws) {
                         }
                     });
                 } else if (masterClient === ws) {
-                    // Already the master, just confirm
                     ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are already the master.' }));
                 }
 
             } else {
-                // Incorrect secret
                 ws.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Incorrect secret. You are a slave.' }));
                 console.log('Client attempted master role with incorrect secret.');
             }
-            return; // Don't broadcast attemptMaster messages
+            return;
         }
 
-        // Only the current master can send playback commands or track assignments
+        // Only the current master can send commands
         if (ws === masterClient) {
-            if (msg.type === 'playbackCommand') {
-                console.log('Master sent playback command:', msg.command);
+            // Master is requesting that playback starts for everyone
+            if (msg.type === 'requestPlayback') {
+                console.log('Master requested playback. Broadcasting command to all clients...');
+                
+                // Create the command that will be sent to everyone
+                const playbackMsg = { type: 'playbackCommand' };
+
+                // Broadcast the command to EVERY client, including the master
                 wss.clients.forEach(function each(client) {
-                    if (client !== masterClient && client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify(msg)); // Broadcast playback command to all slaves
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify(playbackMsg));
                     }
                 });
+
             } else if (msg.type === 'masterAssignTrack') {
                 console.log('Master assigning track:', msg.trackName);
+                // Broadcast track assignment only to slaves
                 wss.clients.forEach(function each(client) {
                     if (client !== masterClient && client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({ type: 'assignTrack', trackName: msg.trackName })); // Broadcast track assignment to all slaves
+                        client.send(JSON.stringify({ type: 'assignTrack', trackName: msg.trackName }));
                     }
                 });
             }
         } else {
             console.log('Non-master client tried to send command, ignored. Message type:', msg.type);
-            // Optionally inform the client they are not authorized to send commands
-            // ws.send(JSON.stringify({ type: 'error', message: 'You are not authorized to send commands.' }));
         }
     });
 

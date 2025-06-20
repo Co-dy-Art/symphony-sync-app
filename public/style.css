@@ -66,3 +66,35 @@ select {
     font-weight: bold;
     margin-bottom: 20px;
 }
+
+/* IMPORTANT FIX: Ensure ALL main display sections are hidden by default */
+#master-controls,
+#slave-display,
+#audio-activation-container {
+    display: none; /* JS will explicitly set these to 'block' when needed */
+}
+
+/* Style for the new secret input field */
+.secret-input {
+    padding: 10px;
+    margin: 10px 0;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    width: calc(100% - 20px); /* Adjust for padding */
+    box-sizing: border-box; /* Include padding in width calculation */
+}
+
+.become-master-btn {
+    margin-bottom: 20px;
+}
+
+/* Styles for the new audio activation container and button */
+#audio-activation-container {
+    padding: 15px;
+    background-color: #ffe0b2; /* Light orange background */
+    border: 1px solid #ffb74d; /* Orange border */
+    border-radius: 8px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+    color: #333;
+}

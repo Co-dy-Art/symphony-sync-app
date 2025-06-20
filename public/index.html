@@ -1,3 +1,4 @@
+<!-- public/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,7 +13,16 @@
     <div class="container">
         <h1>Symphony Sync</h1>
         <p id="status">Connecting to server...</p>
-        <div id="master-controls" style="display: none;">
+
+        <!-- NEW: Dedicated Audio Activation Button for slaves -->
+        <!-- This container is hidden by default in CSS and shown by JS only for slaves -->
+        <div id="audio-activation-container">
+            <p>Audio is currently disabled.</p>
+            <button id="activateAudioBtn">Enable Audio</button>
+        </div>
+
+        <!-- Master controls - hidden by default in CSS, shown by JS only for master -->
+        <div id="master-controls">
             <h2>Master Controls</h2>
             <button id="playBtn">Play All</button>
             <button id="stopBtn">Stop All</button>
@@ -20,11 +30,14 @@
             <select id="trackSelect">
                 <option value="track1.mp3">Track 1</option>
                 <option value="track2.mp3">Track 2</option>
-                </select>
+                <!-- Add more tracks as needed -->
+            </select>
             <button id="assignTrackBtn">Assign Selected Track</button>
             <p>Assigned Track for Self: <span id="masterAssignedTrack">N/A</span></p>
         </div>
-        <div id="slave-display" style="display: none;">
+
+        <!-- Slave display - hidden by default in CSS, shown by JS only for slaves -->
+        <div id="slave-display">
             <h2>Slave Display</h2>
             <p>Your Role: Slave</p>
             <p>Assigned Track: <span id="slaveAssignedTrack">Waiting for assignment...</span></p>

@@ -25,7 +25,6 @@ becomeMasterBtn.className = 'become-master-btn';
 slaveDisplay.prepend(becomeMasterBtn);
 slaveDisplay.prepend(masterSecretInput);
 
-// Removed: Reference to audio activation container/button from HTML
 // NEW: Placeholder for dynamic message for audio activation if needed
 let audioActivationMessageElement = null; // Will create dynamically if needed
 
@@ -138,7 +137,9 @@ document.body.addEventListener('touchstart', setupAudioContextActivation);
 // --- WebSocket Connection ---
 function connectWebSocket() {
     // IMPORTANT: Replace 'https://symphony-sync-app.onrender.com' with your actual Render URL
-    ws = new WebSocket('wss://symphony-sync-app.onrender.com');
+    // For local testing, you might use: 'ws://localhost:3000'
+    const wsUrl = window.location.protocol === 'https:' ? 'wss://' + window.location.host : 'ws://' + window.location.host;
+    ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';
@@ -182,7 +183,8 @@ function connectWebSocket() {
 
             console.log(`Assigned role: ${isMaster ? 'Master' : 'Slave'}`);
         } else if (message.type === 'playbackCommand' && !isMaster) {
-            handleSlaveCommand(command);
+            // *** FIX #1: Correctly pass the nested 'command' object ***
+            handleSlaveCommand(message.command);
         } else if (message.type === 'assignTrack' && !isMaster) {
             slaveAssignedTrackSpan.textContent = message.trackName;
             assignedTrack = message.trackName;
@@ -225,7 +227,7 @@ function connectWebSocket() {
 async function loadAudio(url) {
     // It is critical that audioContext is in 'running' state BEFORE trying to decode or play.
     // displayAudioActivationPrompt() will guide the user.
-    if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
+    if (!audioContext || audioContext.state !== 'running') {
         console.warn('AudioContext is not running or suspended. Cannot load audio until it is active.');
         playbackStatusSpan.textContent = 'Audio context suspended. Please click to enable.';
         if (!isMaster) { // Only show prompt on slaves
@@ -251,19 +253,19 @@ async function loadAudio(url) {
 }
 
 // --- Playback Functions (Master & Slave) ---
-function playAudio(delay = 0) {
-    if (!currentAudioBuffer || !audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-        console.warn('No audio buffer loaded or AudioContext not running. Cannot play.');
-        playbackStatusSpan.textContent = 'Audio context suspended. Please click to enable.';
-        // Show the enable audio prompt again if trying to play but context is suspended
-        if (!isMaster) { // Only for slaves
+// *** FIX #2: Universal function to schedule playback at a precise time ***
+function playAudio(startTime) {
+    if (!currentAudioBuffer || !audioContext || audioContext.state !== 'running') {
+        console.warn(`Cannot play. Buffer: ${!!currentAudioBuffer}, Context: ${audioContext ? audioContext.state : 'null'}`);
+        playbackStatusSpan.textContent = 'Audio not ready or not enabled by user click.';
+        if (!isMaster) {
             displayAudioActivationPrompt();
         }
-        return; // IMPORTANT: Do not proceed with playing if AudioContext is not active
+        return;
     }
 
     if (currentAudioSource) {
-        currentAudioSource.stop(); // Stop previous source if it exists
+        currentAudioSource.stop();
         currentAudioSource.disconnect();
     }
 
@@ -271,11 +273,10 @@ function playAudio(delay = 0) {
     currentAudioSource.buffer = currentAudioBuffer;
     currentAudioSource.connect(audioContext.destination);
 
-    // Schedule playback with a small delay for synchronization
-    // This is the crucial part for attempting sync across devices
-    const startTime = audioContext.currentTime + delay; // delay in seconds
-    currentAudioSource.start(startTime);
-    playbackStatusSpan.textContent = `Playing (scheduled for ${startTime.toFixed(3)})`;
+    // Schedule playback for the exact absolute time received from the master.
+    currentAudioSource.start(startTime); 
+    
+    playbackStatusSpan.textContent = `Playback scheduled for time: ${startTime.toFixed(3)}`;
 
     currentAudioSource.onended = () => {
         console.log('Audio finished.');
@@ -294,16 +295,29 @@ function stopAudio() {
 }
 
 // --- Master Control Logic ---
+// *** FIX #3: Master sends a precise future start time ***
 playBtn.addEventListener('click', () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        // Send a play command with a future start time (e.g., 500ms from now)
-        // This gives clients a small buffer to receive the command before playing
-        const command = { action: 'play', delay: 0.5 };
+    if (ws && ws.readyState === WebSocket.OPEN && audioContext && audioContext.state === 'running') {
+        // 1. Calculate an absolute future start time (e.g., 2 seconds from now)
+        const startTime = audioContext.currentTime + 2.0;
+
+        // 2. Create the command with this absolute start time
+        const command = { action: 'play', time: startTime };
+
+        // 3. Send the command to the server
         ws.send(JSON.stringify({ type: 'playbackCommand', command: command }));
-        // Master also plays its own track
-        playAudio(command.delay);
+        
+        // 4. The master also plays its own track using the SAME start time
+        playAudio(startTime);
+        console.log(`Master initiated synchronized playback for time: ${startTime}`);
+    } else {
+        console.warn("Cannot start playback. Master's WebSocket is not open or AudioContext is not running.");
+        if (!audioContext || audioContext.state !== 'running') {
+             playbackStatusSpan.textContent = "Your audio is not active. Please click the screen.";
+        }
     }
 });
+
 
 stopBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -314,9 +328,6 @@ stopBtn.addEventListener('click', () => {
     }
 });
 
-// The assignTrackBtn listener logic. This is the SOLE, correct listener for this button.
-// It sends a 'masterAssignTrack' message to the server,
-// which the server then broadcasts as 'assignTrack' to slaves.
 assignTrackBtn.addEventListener('click', async () => {
     const selectedTrack = trackSelect.value;
     if (selectedTrack) {
@@ -336,10 +347,11 @@ assignTrackBtn.addEventListener('click', async () => {
 });
 
 // --- Slave Command Handler ---
+// *** FIX #4: Slave handler now looks for 'time' property ***
 function handleSlaveCommand(command) {
     console.log('Slave received command:', command);
-    if (command.action === 'play') {
-        playAudio(command.delay);
+    if (command.action === 'play' && command.time) {
+        playAudio(command.time);
     } else if (command.action === 'stop') {
         stopAudio();
     }
@@ -354,7 +366,7 @@ becomeMasterBtn.addEventListener('click', () => {
             masterSecretInput.value = ''; // Clear input after sending
         }
     } else {
-        alert('Please enter the Master Secret.'); // Use alert for simplicity, could be custom modal
+        alert('Please enter the Master Secret.');
     }
 });
 

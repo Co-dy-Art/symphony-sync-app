@@ -22,7 +22,6 @@ becomeMasterBtn.textContent = 'Become Master';
 becomeMasterBtn.className = 'become-master-btn';
 
 // Add new elements to slaveDisplay (initially hidden)
-// Note: These are prepended, so they appear at the top of the slaveDisplay div
 slaveDisplay.prepend(becomeMasterBtn);
 slaveDisplay.prepend(masterSecretInput);
 
@@ -33,11 +32,11 @@ const activateAudioBtn = document.getElementById('activateAudioBtn');
 
 let ws;
 let isMaster = false;
-let audioContext = null; // Initialize as null, create on user gesture
+let audioContext = null; // Initialize as null, will be created/resumed on user gesture
 let currentAudioBuffer = null;
 let currentAudioSource = null; // To keep track of the currently playing source
 let assignedTrack = null;
-// Removed: let audioContextResumed = false; // Rely directly on audioContext.state
+
 
 // --- Service Worker Registration ---
 if ('serviceWorker' in navigator) {
@@ -53,22 +52,28 @@ if ('serviceWorker' in navigator) {
 }
 
 // --- AudioContext Initialization and Resume Function ---
-// This function will be called ONLY by the dedicated "Enable Audio" button.
-function initializeAndResumeAudioContext() {
-    if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        console.log('AudioContext initialized.');
-    }
+// This function is designed to be called by a direct user gesture (button click).
+async function initializeAndResumeAudioContext() {
+    try {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('AudioContext initialized.');
+        }
 
-    if (audioContext.state === 'suspended') {
-        audioContext.resume().then(() => {
+        // Always attempt to resume if not in 'running' state
+        if (audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
+            await audioContext.resume();
             console.log('AudioContext resumed successfully via button.');
-            audioActivationContainer.style.display = 'none'; // Hide button after resume
-        }).catch(e => console.error('Error resuming AudioContext:', e));
-    } else {
-        // If already running or not suspended, just hide the button
+        } else {
+            console.log('AudioContext already running or in unresumable state.');
+        }
+        // Always hide the activation container once this function is executed,
+        // as the user has performed the gesture.
         audioActivationContainer.style.display = 'none';
-        console.log('AudioContext already active or not suspended.');
+
+    } catch (e) {
+        console.error('Error initializing or resuming AudioContext:', e);
+        playbackStatusSpan.textContent = 'Audio activation failed. See console.';
     }
 }
 
@@ -88,7 +93,7 @@ function connectWebSocket() {
         // Ensure master/slave UI and audio activation UI are hidden until role is assigned
         masterControls.style.display = 'none';
         slaveDisplay.style.display = 'none';
-        audioActivationContainer.style.display = 'none'; 
+        audioActivationContainer.style.display = 'none'; // Initially hidden
     };
 
     ws.onmessage = async (event) => {
@@ -107,12 +112,8 @@ function connectWebSocket() {
             } else { // Is Slave
                 masterControls.style.display = 'none';
                 slaveDisplay.style.display = 'block';
-                // Show audio activation message for slaves only if audio context is not yet active
-                // Initialize audioContext here for its state to be checked
-                if (!audioContext) { // If it's null, it hasn't been touched yet
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                if (audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
+                // Show audio activation message for slaves only if AudioContext is not yet running
+                if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
                     audioActivationContainer.style.display = 'block';
                 } else {
                     audioActivationContainer.style.display = 'none';
@@ -170,11 +171,19 @@ function connectWebSocket() {
 
 // --- Web Audio API Initialization and Loading ---
 async function loadAudio(url) {
-    // AudioContext will be initialized by the button click
-    if (!audioContext) { // As a fallback, if for some reason button wasn't clicked first
-         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-         console.warn('AudioContext initialized by loadAudio, ideally should be by button.');
+    // AudioContext must be active when calling decodeAudioData or starting sources.
+    // It should be activated by the 'Enable Audio' button first.
+    if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
+        console.warn('AudioContext is not running. Attempting to resume from loadAudio, but user gesture may be needed.');
+        // Attempt to resume, but it might fail without a direct user gesture from this function.
+        if (audioContext) {
+            await audioContext.resume().catch(e => console.error("Could not resume AudioContext in loadAudio fallback:", e));
+        } else {
+             audioContext = new (window.AudioContext || window.webkitAudioContext)(); // Initialize if null
+             await audioContext.resume().catch(e => console.error("Could not init/resume AudioContext in loadAudio fallback:", e));
+        }
     }
+
     playbackStatusSpan.textContent = 'Loading audio...';
     try {
         const response = await fetch(url);
@@ -193,16 +202,14 @@ async function loadAudio(url) {
 
 // --- Playback Functions (Master & Slave) ---
 function playAudio(delay = 0) {
-    if (!currentAudioBuffer || !audioContext) {
-        console.warn('No audio buffer loaded or AudioContext not initialized.');
-        playbackStatusSpan.textContent = 'No track assigned or loaded.';
+    if (!currentAudioBuffer || !audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
+        console.warn('No audio buffer loaded or AudioContext not running. Cannot play.');
+        playbackStatusSpan.textContent = 'Audio context not active. Click Enable Audio.';
+        // Also show the enable audio button again if trying to play but context is suspended
+        if (!isMaster) { // Only for slaves
+            audioActivationContainer.style.display = 'block';
+        }
         return;
-    }
-
-    // Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
-    // This is a fallback, primary resume is now on dedicated button click
-    if (audioContext.state === 'suspended') {
-        audioContext.resume();
     }
 
     if (currentAudioSource) {

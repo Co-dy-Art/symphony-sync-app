@@ -193,6 +193,8 @@ stopBtn.addEventListener('click', () => {
 });
 
 // The assignTrackBtn listener logic. This is the SOLE, correct listener for this button.
+// It sends a 'masterAssignTrack' message to the server,
+// which the server then broadcasts as 'assignTrack' to slaves.
 assignTrackBtn.addEventListener('click', async () => {
     const selectedTrack = trackSelect.value;
     if (selectedTrack) {
@@ -223,6 +225,11 @@ function handleSlaveCommand(command) {
 
 // --- New: Become Master Button Logic ---
 becomeMasterBtn.addEventListener('click', () => {
+    // This interaction ensures AudioContext is resumed, allowing later programmatic playback
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+
     const secret = masterSecretInput.value;
     if (secret) {
         if (ws && ws.readyState === WebSocket.OPEN) {

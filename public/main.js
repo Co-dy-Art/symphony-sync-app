@@ -39,8 +39,8 @@ function connectWebSocket() {
     ws.onopen = () => {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';
         console.log('WebSocket connected.');
-        // Request role from server (or server assigns automatically as per server.js)
-        ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
+        // FIX: Removed the client-side role request to prevent conflict with server's automatic assignment.
+        // The original line was: ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
     };
 
     ws.onmessage = async (event) => {
@@ -48,6 +48,7 @@ function connectWebSocket() {
         console.log('Message from server:', message);
 
         if (message.type === 'role') {
+            // The server now correctly assigns 'master' or 'slave' based on connection order.
             isMaster = (message.role === 'master');
             statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'}`;
             masterControls.style.display = isMaster ? 'block' : 'none';
@@ -110,6 +111,11 @@ function playAudio(delay = 0) {
         return;
     }
 
+    // FIX: Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+
     if (currentAudioSource) {
         currentAudioSource.stop(); // Stop previous source if it exists
         currentAudioSource.disconnect();
@@ -142,46 +148,45 @@ function stopAudio() {
 }
 
 // --- Master Control Logic ---
+// playBtn listener
 playBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // Send a play command with a future start time (e.g., 500ms from now)
-        // This gives clients a small buffer to receive the command before playing
-        const command = { action: 'play', delay: 0.5 }; // 0.5 seconds delay
+        const command = { action: 'play', delay: 0.5 };
         ws.send(JSON.stringify({ type: 'playbackCommand', command: command }));
-        // Master also plays its own track
-        playAudio(command.delay);
+        playAudio(command.delay); // Master also plays its own track
     }
 });
 
+// stopBtn listener
 stopBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         const command = { action: 'stop' };
         ws.send(JSON.stringify({ type: 'playbackCommand', command: command }));
-        // Master also stops its own track
-        stopAudio();
+        stopAudio(); // Master also stops its own track
     }
 });
 
+// The assignTrackBtn listener logic. This is the SOLE listener for this button.
+// It sends a 'masterAssignTrack' message to the server,
+// which the server then broadcasts as 'assignTrack' to slaves.
 assignTrackBtn.addEventListener('click', async () => {
     const selectedTrack = trackSelect.value;
     if (selectedTrack) {
-        assignedTrack = selectedTrack; // Assign to master itself
+        assignedTrack = selectedTrack; // Master assigns to itself
         masterAssignedTrackSpan.textContent = selectedTrack;
         console.log(`Master assigned self track: ${selectedTrack}`);
         await loadAudio(`/audio/${selectedTrack}`); // Load master's own audio
 
-        // Broadcast track assignment to slaves
-        wss.clients.forEach(function each(client) { // This is server-side concept, need to send via server
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ 
-                    type: 'assignTrackToSlave', // New type for server to handle
-                    trackName: selectedTrack,
-                    targetClient: 'all' // In a real app, you'd target specific clients
-                }));
-            }
-        });
+        // Send a message to the server to broadcast the assignment
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'masterAssignTrack', // This type is handled by the server to broadcast
+                trackName: selectedTrack
+            }));
+        }
     }
 });
+
 
 // --- Slave Command Handler ---
 function handleSlaveCommand(command) {
@@ -195,22 +200,3 @@ function handleSlaveCommand(command) {
 
 // Initial connection attempt when the page loads
 connectWebSocket();
-
-// Update assignTrackBtn listener in main.js
-assignTrackBtn.addEventListener('click', async () => {
-    const selectedTrack = trackSelect.value;
-    if (selectedTrack) {
-        assignedTrack = selectedTrack; // Master assigns to itself
-        masterAssignedTrackSpan.textContent = selectedTrack;
-        console.log(`Master assigned self track: ${selectedTrack}`);
-        await loadAudio(`/audio/${selectedTrack}`); // Load master's own audio
-
-        // Send a message to the server to broadcast the assignment
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ 
-                type: 'masterAssignTrack', // New type for server to handle
-                trackName: selectedTrack
-            }));
-        }
-    }
-});

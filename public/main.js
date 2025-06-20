@@ -33,10 +33,8 @@ if ('serviceWorker' in navigator) {
 
 // --- WebSocket Connection ---
 function connectWebSocket() {
-    // IMPORTANT: For testing on actual phones on your local network,
-    // replace 'localhost' with your computer's local IP address (e.g., '192.168.1.5:3000').
-    // To find your IP, open terminal/cmd and type `ipconfig` (Windows) or `ifconfig` / `ip addr` (macOS/Linux).
-    ws = new WebSocket('ws://localhost:3000'); // Use wss:// for production with HTTPS
+    // IMPORTANT: Replace 'https://symphony-sync-app.onrender.com' with your actual Render URL
+    ws = new WebSocket('wss://symphony-sync-app.onrender.com');
 
     ws.onopen = () => {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';

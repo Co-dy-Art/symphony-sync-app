@@ -86,7 +86,7 @@ function connectWebSocket() {
         // Ensure master/slave UI and audio activation UI are hidden until role is assigned
         masterControls.style.display = 'none';
         slaveDisplay.style.display = 'none';
-        // NEW: Only show audio activation for slaves, and initially hide if not yet determined.
+        // Ensure audio activation is hidden initially until role is determined
         audioActivationContainer.style.display = 'none'; 
     };
 
@@ -98,7 +98,7 @@ function connectWebSocket() {
             isMaster = (message.role === 'master');
             statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'} (${message.message || ''})`;
 
-            // FIX: Correctly manage display of main sections based on role
+            // Correctly manage display of main sections based on role
             if (isMaster) {
                 masterControls.style.display = 'block';
                 slaveDisplay.style.display = 'none';
@@ -282,7 +282,7 @@ function handleSlaveCommand(command) {
 
 // --- New: Become Master Button Logic ---
 becomeMasterBtn.addEventListener('click', () => {
-    // AudioContext resume is now handled by universal document click/touch listener.
+    // AudioContext resume is now primarily handled by the dedicated "Enable Audio" button click.
     // This button click is primarily for sending the secret.
 
     const secret = masterSecretInput.value;

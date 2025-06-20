@@ -68,13 +68,14 @@ select {
 }
 
 /* IMPORTANT FIX: Ensure ALL main display sections are hidden by default */
+/* Note: #audio-activation-message is included here */
 #master-controls,
 #slave-display,
-#audio-activation-container {
+#audio-activation-message {
     display: none; /* JS will explicitly set these to 'block' when needed */
 }
 
-/* Style for the new secret input field */
+/* Style for the secret input field */
 .secret-input {
     padding: 10px;
     margin: 10px 0;
@@ -88,8 +89,8 @@ select {
     margin-bottom: 20px;
 }
 
-/* Styles for the new audio activation container and button */
-#audio-activation-container {
+/* Reverted: Styles for the general audio activation message */
+#audio-activation-message {
     padding: 15px;
     background-color: #ffe0b2; /* Light orange background */
     border: 1px solid #ffb74d; /* Orange border */

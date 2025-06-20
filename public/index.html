@@ -14,14 +14,11 @@
         <h1>Symphony Sync</h1>
         <p id="status">Connecting to server...</p>
 
-        <!-- NEW: Dedicated Audio Activation Button for slaves -->
-        <!-- This container is hidden by default in CSS and shown by JS only for slaves -->
-        <div id="audio-activation-container">
-            <p>Audio is currently disabled.</p>
-            <button id="activateAudioBtn">Enable Audio</button>
+        <!-- Reverted: General Audio Activation Message for slaves -->
+        <div id="audio-activation-message">
+            <p>Tap anywhere on the screen to enable audio.</p>
         </div>
 
-        <!-- Master controls - hidden by default in CSS, shown by JS only for master -->
         <div id="master-controls">
             <h2>Master Controls</h2>
             <button id="playBtn">Play All</button>
@@ -36,7 +33,6 @@
             <p>Assigned Track for Self: <span id="masterAssignedTrack">N/A</span></p>
         </div>
 
-        <!-- Slave display - hidden by default in CSS, shown by JS only for slaves -->
         <div id="slave-display">
             <h2>Slave Display</h2>
             <p>Your Role: Slave</p>

@@ -25,18 +25,17 @@ becomeMasterBtn.className = 'become-master-btn';
 slaveDisplay.prepend(becomeMasterBtn);
 slaveDisplay.prepend(masterSecretInput);
 
-// NEW: Reference to the audio activation container and button
-const audioActivationContainer = document.getElementById('audio-activation-container');
-const activateAudioBtn = document.getElementById('activateAudioBtn');
+// Reverted: Reference to the general audio activation message
+const audioActivationMessage = document.getElementById('audio-activation-message');
 
 
 let ws;
 let isMaster = false;
-let audioContext = null; // Initialize as null, will be created/resumed on user gesture
+let audioContext;
 let currentAudioBuffer = null;
 let currentAudioSource = null; // To keep track of the currently playing source
 let assignedTrack = null;
-
+let audioContextResumed = false; // Flag to ensure resume only happens once
 
 // --- Service Worker Registration ---
 if ('serviceWorker' in navigator) {
@@ -51,34 +50,28 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-// --- AudioContext Initialization and Resume Function ---
-// This function is designed to be called by a direct user gesture (button click).
-async function initializeAndResumeAudioContext() {
-    try {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            console.log('AudioContext initialized.');
-        }
-
-        // Always attempt to resume if not in 'running' state
-        if (audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-            await audioContext.resume();
-            console.log('AudioContext resumed successfully via button.');
-        } else {
-            console.log('AudioContext already running or in unresumable state.');
-        }
-        // Always hide the activation container once this function is executed,
-        // as the user has performed the gesture.
-        audioActivationContainer.style.display = 'none';
-
-    } catch (e) {
-        console.error('Error initializing or resuming AudioContext:', e);
-        playbackStatusSpan.textContent = 'Audio activation failed. See console.';
+// --- Universal AudioContext Resume on User Gesture (Reverted to general click) ---
+// This function will be called on any user click/touch to unlock audio
+function resumeAudioContext() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended' && !audioContextResumed) {
+        audioContext.resume().then(() => {
+            console.log('AudioContext resumed successfully on user gesture.');
+            audioContextResumed = true; // Set flag to prevent repeated attempts
+            // Hide the activation message after successful resume
+            audioActivationMessage.style.display = 'none';
+            // Remove the listeners after successful resume
+            document.body.removeEventListener('click', resumeAudioContext);
+            document.body.removeEventListener('touchstart', resumeAudioContext);
+        }).catch(e => console.error('Error resuming AudioContext:', e));
     }
 }
 
-// Attach click listener to the dedicated "Enable Audio" button
-activateAudioBtn.addEventListener('click', initializeAndResumeAudioContext);
+// Attach a universal click/touch listener to resume audio context
+document.body.addEventListener('click', resumeAudioContext);
+document.body.addEventListener('touchstart', resumeAudioContext); // For mobile touch events
 
 
 // --- WebSocket Connection ---
@@ -89,11 +82,14 @@ function connectWebSocket() {
     ws.onopen = () => {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';
         console.log('WebSocket connected.');
+        // FIX: Removed the automatic 'requestRole' from previous versions.
+        // The original problematic line was: ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
 
         // Ensure master/slave UI and audio activation UI are hidden until role is assigned
         masterControls.style.display = 'none';
         slaveDisplay.style.display = 'none';
-        audioActivationContainer.style.display = 'none'; // Initially hidden
+        // NEW: Only show audio activation for slaves, and initially hide if not yet determined.
+        audioActivationMessage.style.display = 'none'; 
     };
 
     ws.onmessage = async (event) => {
@@ -104,19 +100,19 @@ function connectWebSocket() {
             isMaster = (message.role === 'master');
             statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'} (${message.message || ''})`;
 
-            // Correctly manage display of main sections based on role
+            // FIX: Correctly manage display of main sections based on role
             if (isMaster) {
                 masterControls.style.display = 'block';
                 slaveDisplay.style.display = 'none';
-                audioActivationContainer.style.display = 'none'; // Master never needs this
+                audioActivationMessage.style.display = 'none'; // Master never needs this
             } else { // Is Slave
                 masterControls.style.display = 'none';
                 slaveDisplay.style.display = 'block';
-                // Show audio activation message for slaves only if AudioContext is not yet running
-                if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-                    audioActivationContainer.style.display = 'block';
+                // Show audio activation message for slaves only if audio context hasn't resumed
+                if (!audioContextResumed) {
+                    audioActivationMessage.style.display = 'block';
                 } else {
-                    audioActivationContainer.style.display = 'none';
+                    audioActivationMessage.style.display = 'none';
                 }
             }
 
@@ -141,8 +137,8 @@ function connectWebSocket() {
             masterSecretInput.style.display = 'block'; // Allow attempt to become master
             becomeMasterBtn.style.display = 'block';
             // Also show audio activation message for slaves if master disappears and audio not resumed
-            if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-                audioActivationContainer.style.display = 'block';
+            if (!audioContextResumed) {
+                audioActivationMessage.style.display = 'block';
             }
         }
     };
@@ -157,8 +153,8 @@ function connectWebSocket() {
         becomeMasterBtn.style.display = 'block';
         
         // Show audio activation message on disconnect if audio not active
-        if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-            audioActivationContainer.style.display = 'block';
+        if (!audioContextResumed) {
+            audioActivationMessage.style.display = 'block';
         }
         setTimeout(connectWebSocket, 3000); // Attempt to reconnect
     };
@@ -171,19 +167,9 @@ function connectWebSocket() {
 
 // --- Web Audio API Initialization and Loading ---
 async function loadAudio(url) {
-    // AudioContext must be active when calling decodeAudioData or starting sources.
-    // It should be activated by the 'Enable Audio' button first.
-    if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-        console.warn('AudioContext is not running. Attempting to resume from loadAudio, but user gesture may be needed.');
-        // Attempt to resume, but it might fail without a direct user gesture from this function.
-        if (audioContext) {
-            await audioContext.resume().catch(e => console.error("Could not resume AudioContext in loadAudio fallback:", e));
-        } else {
-             audioContext = new (window.AudioContext || window.webkitAudioContext)(); // Initialize if null
-             await audioContext.resume().catch(e => console.error("Could not init/resume AudioContext in loadAudio fallback:", e));
-        }
+    if (!audioContext) { // Ensure AudioContext is initialized if not already
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
-
     playbackStatusSpan.textContent = 'Loading audio...';
     try {
         const response = await fetch(url);
@@ -202,14 +188,15 @@ async function loadAudio(url) {
 
 // --- Playback Functions (Master & Slave) ---
 function playAudio(delay = 0) {
-    if (!currentAudioBuffer || !audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-        console.warn('No audio buffer loaded or AudioContext not running. Cannot play.');
-        playbackStatusSpan.textContent = 'Audio context not active. Click Enable Audio.';
-        // Also show the enable audio button again if trying to play but context is suspended
-        if (!isMaster) { // Only for slaves
-            audioActivationContainer.style.display = 'block';
-        }
+    if (!currentAudioBuffer || !audioContext) {
+        console.warn('No audio buffer loaded or AudioContext not initialized.');
+        playbackStatusSpan.textContent = 'No track assigned or loaded.';
         return;
+    }
+
+    // Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
     }
 
     if (currentAudioSource) {
@@ -297,8 +284,8 @@ function handleSlaveCommand(command) {
 
 // --- New: Become Master Button Logic ---
 becomeMasterBtn.addEventListener('click', () => {
+    // AudioContext resume is now handled by universal document click/touch listener.
     // This button click is primarily for sending the secret.
-    // AudioContext resume is handled by the dedicated "Enable Audio" button.
 
     const secret = masterSecretInput.value;
     if (secret) {

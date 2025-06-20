@@ -82,6 +82,12 @@ function connectWebSocket() {
         console.log('WebSocket connected.');
         // FIX: Removed the automatic 'requestRole' from previous versions.
         // The original problematic line was: ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
+
+        // Ensure master/slave UI and audio activation UI are hidden until role is assigned
+        masterControls.style.display = 'none';
+        slaveDisplay.style.display = 'none';
+        // NEW: Only show audio activation for slaves, and initially hide if not yet determined.
+        audioActivationContainer.style.display = 'none'; 
     };
 
     ws.onmessage = async (event) => {
@@ -96,7 +102,7 @@ function connectWebSocket() {
             if (isMaster) {
                 masterControls.style.display = 'block';
                 slaveDisplay.style.display = 'none';
-                audioActivationContainer.style.display = 'none'; // Ensure hidden for master
+                audioActivationContainer.style.display = 'none'; // Master never needs this
             } else { // Is Slave
                 masterControls.style.display = 'none';
                 slaveDisplay.style.display = 'block';
@@ -114,7 +120,7 @@ function connectWebSocket() {
 
             console.log(`Assigned role: ${isMaster ? 'Master' : 'Slave'}`);
         } else if (message.type === 'playbackCommand' && !isMaster) {
-            handleSlaveCommand(message.command);
+            handleSlaveCommand(command);
         } else if (message.type === 'assignTrack' && !isMaster) {
             slaveAssignedTrackSpan.textContent = message.trackName;
             assignedTrack = message.trackName;
@@ -276,7 +282,7 @@ function handleSlaveCommand(command) {
 
 // --- New: Become Master Button Logic ---
 becomeMasterBtn.addEventListener('click', () => {
-    // AudioContext resume is now primarily handled by the dedicated "Enable Audio" button click.
+    // AudioContext resume is now handled by universal document click/touch listener.
     // This button click is primarily for sending the secret.
 
     const secret = masterSecretInput.value;

@@ -33,43 +33,17 @@ const activateAudioBtn = document.getElementById('activateAudioBtn');
 
 let ws;
 let isMaster = false;
-let audioContext;
+let audioContext; // audioContext will be initialized on first user gesture
 let currentAudioBuffer = null;
 let currentAudioSource = null; // To keep track of the currently playing source
 let assignedTrack = null;
-let audioContextResumed = false; // Flag to ensure resume only happens once
+// Removed: let audioContextResumed = false; // We'll rely on audioContext.state directly now
 
-// --- Service Worker Registration ---
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-            .then(registration => {
-                console.log('Service Worker registered! Scope:', registration.scope);
-            })
-            .catch(err => {
-                console.error('Service Worker registration failed:', err);
-            });
-    });
-}
 
 // --- Universal AudioContext Resume on User Gesture ---
-// This function will be called by the dedicated button to unlock audio
-function resumeAudioContext() {
-    if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (audioContext.state === 'suspended' && !audioContextResumed) {
-        audioContext.resume().then(() => {
-            console.log('AudioContext resumed successfully on user gesture.');
-            audioContextResumed = true; // Set flag to prevent repeated attempts
-            // Hide the activation container after successful resume
-            audioActivationContainer.style.display = 'none';
-        }).catch(e => console.error('Error resuming AudioContext:', e));
-    }
-}
-
-// Attach click listener to the new dedicated button
-activateAudioBtn.addEventListener('click', resumeAudioContext);
+// This logic is now contained directly within the activateAudioBtn click.
+// Removed: document.body.addEventListener('click', resumeAudioContext);
+// Removed: document.body.addEventListener('touchstart', resumeAudioContext);
 
 
 // --- WebSocket Connection ---
@@ -81,7 +55,6 @@ function connectWebSocket() {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';
         console.log('WebSocket connected.');
         // FIX: Removed the automatic 'requestRole' from previous versions.
-        // The original problematic line was: ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
 
         // Ensure master/slave UI and audio activation UI are hidden until role is assigned
         masterControls.style.display = 'none';
@@ -107,7 +80,8 @@ function connectWebSocket() {
                 masterControls.style.display = 'none';
                 slaveDisplay.style.display = 'block';
                 // Show audio activation message for slaves only if audio context hasn't resumed
-                if (!audioContextResumed) {
+                // AudioContext initialized/resumed on activateAudioBtn click
+                if (!audioContext || audioContext.state === 'suspended') { // Check if context exists AND is suspended
                     audioActivationContainer.style.display = 'block';
                 } else {
                     audioActivationContainer.style.display = 'none';
@@ -135,7 +109,7 @@ function connectWebSocket() {
             masterSecretInput.style.display = 'block'; // Allow attempt to become master
             becomeMasterBtn.style.display = 'block';
             // Also show audio activation message for slaves if master disappears and audio not resumed
-            if (!audioContextResumed) {
+            if (!audioContext || audioContext.state === 'suspended') { // Check if context exists AND is suspended
                 audioActivationContainer.style.display = 'block';
             }
         }
@@ -151,7 +125,7 @@ function connectWebSocket() {
         becomeMasterBtn.style.display = 'block';
         
         // Show audio activation message on disconnect if audio not active
-        if (!audioContextResumed) {
+        if (!audioContext || audioContext.state === 'suspended') {
             audioActivationContainer.style.display = 'block';
         }
         setTimeout(connectWebSocket, 3000); // Attempt to reconnect
@@ -165,7 +139,7 @@ function connectWebSocket() {
 
 // --- Web Audio API Initialization and Loading ---
 async function loadAudio(url) {
-    if (!audioContext) { // Ensure AudioContext is initialized if not already
+    if (!audioContext) { // Initialize AudioContext if it hasn't been by 'Enable Audio' button
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
     playbackStatusSpan.textContent = 'Loading audio...';
@@ -192,7 +166,7 @@ function playAudio(delay = 0) {
         return;
     }
 
-    // Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
+    // Ensure audio context is resumed if suspended (redundant if activateAudioBtn works, but safe fallback)
     if (audioContext.state === 'suspended') {
         audioContext.resume();
     }

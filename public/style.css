@@ -68,10 +68,8 @@ select {
 }
 
 /* IMPORTANT FIX: Ensure ALL main display sections are hidden by default */
-/* Note: #audio-activation-message is included here */
 #master-controls,
-#slave-display,
-#audio-activation-message {
+#slave-display {
     display: none; /* JS will explicitly set these to 'block' when needed */
 }
 
@@ -87,15 +85,4 @@ select {
 
 .become-master-btn {
     margin-bottom: 20px;
-}
-
-/* Reverted: Styles for the general audio activation message */
-#audio-activation-message {
-    padding: 15px;
-    background-color: #ffe0b2; /* Light orange background */
-    border: 1px solid #ffb74d; /* Orange border */
-    border-radius: 8px;
-    margin-top: 20px;
-    margin-bottom: 20px;
-    color: #333;
 }

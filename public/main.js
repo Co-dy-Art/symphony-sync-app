@@ -11,6 +11,21 @@ const masterAssignedTrackSpan = document.getElementById('masterAssignedTrack');
 const slaveAssignedTrackSpan = document.getElementById('slaveAssignedTrack');
 const playbackStatusSpan = document.getElementById('playbackStatus');
 
+// NEW ELEMENTS FOR MASTER SECRET
+const masterSecretInput = document.createElement('input');
+masterSecretInput.type = 'password';
+masterSecretInput.placeholder = 'Enter Master Secret';
+masterSecretInput.className = 'secret-input';
+
+const becomeMasterBtn = document.createElement('button');
+becomeMasterBtn.textContent = 'Become Master';
+becomeMasterBtn.className = 'become-master-btn';
+
+// Add new elements to slaveDisplay (initially hidden)
+slaveDisplay.prepend(becomeMasterBtn);
+slaveDisplay.prepend(masterSecretInput);
+
+
 let ws;
 let isMaster = false;
 let audioContext;
@@ -39,8 +54,8 @@ function connectWebSocket() {
     ws.onopen = () => {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';
         console.log('WebSocket connected.');
-        // FIX: Removed the client-side role request to prevent conflict with server's automatic assignment.
-        // The original line was: ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
+        // FIX: Removed the automatic 'requestRole' from previous versions.
+        // The original problematic line was: ws.send(JSON.stringify({ type: 'requestRole', role: 'auto' }));
     };
 
     ws.onmessage = async (event) => {
@@ -48,11 +63,13 @@ function connectWebSocket() {
         console.log('Message from server:', message);
 
         if (message.type === 'role') {
-            // The server now correctly assigns 'master' or 'slave' based on connection order.
             isMaster = (message.role === 'master');
-            statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'}`;
+            statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'} (${message.message || ''})`;
             masterControls.style.display = isMaster ? 'block' : 'none';
             slaveDisplay.style.display = isMaster ? 'none' : 'block';
+            // Show/hide master secret input based on role
+            masterSecretInput.style.display = isMaster ? 'none' : 'block';
+            becomeMasterBtn.style.display = isMaster ? 'none' : 'block';
             console.log(`Assigned role: ${isMaster ? 'Master' : 'Slave'}`);
         } else if (message.type === 'playbackCommand' && !isMaster) {
             handleSlaveCommand(message.command);
@@ -64,6 +81,11 @@ function connectWebSocket() {
             if (assignedTrack) {
                 await loadAudio(`/audio/${assignedTrack}`);
             }
+        } else if (message.type === 'masterStatusChange' && !isMaster) {
+            // If master disconnects or new master emerges, update slave UI
+            statusElement.textContent = `You are: Slave (${message.message || 'Master status changed'})`;
+            masterSecretInput.style.display = 'block'; // Allow attempt to become master
+            becomeMasterBtn.style.display = 'block';
         }
     };
 
@@ -73,6 +95,8 @@ function connectWebSocket() {
         isMaster = false; // Reset role
         masterControls.style.display = 'none';
         slaveDisplay.style.display = 'none';
+        masterSecretInput.style.display = 'block'; // Show input on disconnect
+        becomeMasterBtn.style.display = 'block';
         setTimeout(connectWebSocket, 3000); // Attempt to reconnect
     };
 
@@ -111,7 +135,7 @@ function playAudio(delay = 0) {
         return;
     }
 
-    // FIX: Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
+    // Ensure audio context is resumed if suspended (e.g., due to user interaction policy)
     if (audioContext.state === 'suspended') {
         audioContext.resume();
     }
@@ -148,27 +172,27 @@ function stopAudio() {
 }
 
 // --- Master Control Logic ---
-// playBtn listener
 playBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        const command = { action: 'play', delay: 0.5 };
+        // Send a play command with a future start time (e.g., 500ms from now)
+        // This gives clients a small buffer to receive the command before playing
+        const command = { action: 'play', delay: 0.5 }; // 0.5 seconds delay
         ws.send(JSON.stringify({ type: 'playbackCommand', command: command }));
-        playAudio(command.delay); // Master also plays its own track
+        // Master also plays its own track
+        playAudio(command.delay);
     }
 });
 
-// stopBtn listener
 stopBtn.addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         const command = { action: 'stop' };
         ws.send(JSON.stringify({ type: 'playbackCommand', command: command }));
-        stopAudio(); // Master also stops its own track
+        // Master also stops its own track
+        stopAudio();
     }
 });
 
-// The assignTrackBtn listener logic. This is the SOLE listener for this button.
-// It sends a 'masterAssignTrack' message to the server,
-// which the server then broadcasts as 'assignTrack' to slaves.
+// The assignTrackBtn listener logic. This is the SOLE, correct listener for this button.
 assignTrackBtn.addEventListener('click', async () => {
     const selectedTrack = trackSelect.value;
     if (selectedTrack) {
@@ -187,7 +211,6 @@ assignTrackBtn.addEventListener('click', async () => {
     }
 });
 
-
 // --- Slave Command Handler ---
 function handleSlaveCommand(command) {
     console.log('Slave received command:', command);
@@ -197,6 +220,20 @@ function handleSlaveCommand(command) {
         stopAudio();
     }
 }
+
+// --- New: Become Master Button Logic ---
+becomeMasterBtn.addEventListener('click', () => {
+    const secret = masterSecretInput.value;
+    if (secret) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'attemptMaster', secret: secret }));
+            masterSecretInput.value = ''; // Clear input after sending
+        }
+    } else {
+        alert('Please enter the Master Secret.'); // Use alert for simplicity, could be custom modal
+    }
+});
+
 
 // Initial connection attempt when the page loads
 connectWebSocket();

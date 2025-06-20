@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Symphony Sync</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#317EFB"/>
+</head>
+<body>
+    <div class="container">
+        <h1>Symphony Sync</h1>
+        <p id="status">Connecting to server...</p>
+        <div id="master-controls" style="display: none;">
+            <h2>Master Controls</h2>
+            <button id="playBtn">Play All</button>
+            <button id="stopBtn">Stop All</button>
+            <label for="trackSelect">Assign Track:</label>
+            <select id="trackSelect">
+                <option value="track1.mp3">Track 1</option>
+                <option value="track2.mp3">Track 2</option>
+                </select>
+            <button id="assignTrackBtn">Assign Selected Track</button>
+            <p>Assigned Track for Self: <span id="masterAssignedTrack">N/A</span></p>
+        </div>
+        <div id="slave-display" style="display: none;">
+            <h2>Slave Display</h2>
+            <p>Your Role: Slave</p>
+            <p>Assigned Track: <span id="slaveAssignedTrack">Waiting for assignment...</span></p>
+            <p>Playback Status: <span id="playbackStatus">Ready</span></p>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>

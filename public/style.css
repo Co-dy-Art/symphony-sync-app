@@ -31,6 +31,12 @@ h2 {
     margin-bottom: 15px;
 }
 
+h3 {
+    text-align: left;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
 button {
     background-color: #007bff;
     color: white;
@@ -51,6 +57,13 @@ button:active {
     background-color: #003d80;
 }
 
+/* NEW: Style for disabled buttons */
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+
 label {
     margin-right: 10px;
 }
@@ -67,20 +80,50 @@ select {
     margin-bottom: 20px;
 }
 
-/* IMPORTANT FIX: Ensure ALL main display sections are hidden by default */
 #master-controls,
 #slave-display {
-    display: none; /* JS will explicitly set these to 'block' when needed */
+    display: none;
 }
 
-/* Style for the secret input field */
+#master-self-assign-container {
+    text-align: left;
+    margin: 20px 0;
+}
+
+#slave-list-container {
+    list-style-type: none;
+    padding: 0;
+    text-align: left;
+}
+
+#slave-list-container li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+/* NEW: Styles for the status indicator */
+.status-indicator {
+    font-size: 24px;
+    line-height: 1;
+    margin-right: 10px;
+    color: #dc3545; /* Red for Not Ready */
+}
+
+.status-indicator.ready {
+    color: #28a745; /* Green for Ready */
+}
+
+
 .secret-input {
     padding: 10px;
     margin: 10px 0;
     border: 1px solid #ccc;
     border-radius: 5px;
-    width: calc(100% - 20px); /* Adjust for padding */
-    box-sizing: border-box; /* Include padding in width calculation */
+    width: calc(100% - 20px);
+    box-sizing: border-box;
 }
 
 .become-master-btn {

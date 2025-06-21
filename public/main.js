@@ -5,10 +5,10 @@ const masterControls = document.getElementById('master-controls');
 const slaveDisplay = document.getElementById('slave-display');
 const playBtn = document.getElementById('playBtn');
 const stopBtn = document.getElementById('stopBtn');
-const masterAssignedTrackSpan = document.getElementById('masterAssignedTrack');
 const slaveAssignedTrackSpan = document.getElementById('slaveAssignedTrack');
 const playbackStatusSpan = document.getElementById('playbackStatus');
-const slaveListContainer = document.getElementById('slave-list-container'); // Get the new list container
+const slaveListContainer = document.getElementById('slave-list-container');
+const masterTrackSelect = document.getElementById('masterTrackSelect'); // Get the master's new dropdown
 
 // Master Secret UI Elements
 const masterSecretInput = document.createElement('input');
@@ -107,11 +107,6 @@ function connectWebSocket() {
     ws.onopen = () => {
         statusElement.textContent = 'Connected to server. Waiting for role assignment...';
         console.log('WebSocket connected.');
-        masterControls.style.display = 'none';
-        slaveDisplay.style.display = 'none';
-        if (audioActivationMessageElement) {
-            audioActivationMessageElement.style.display = 'none';
-        }
     };
 
     ws.onmessage = async (event) => {
@@ -124,8 +119,7 @@ function connectWebSocket() {
             updateUIVisibility();
 
             if (isMaster && message.existingClients) {
-                // If I just became master, render the list of already connected slaves
-                slaveListContainer.innerHTML = ''; // Clear any old list items
+                slaveListContainer.innerHTML = '';
                 message.existingClients.forEach(clientId => addClientToList(clientId));
             }
 
@@ -142,10 +136,8 @@ function connectWebSocket() {
             assignedTrack = message.trackName;
             if (assignedTrack) await loadAudio(`/audio/${assignedTrack}`);
         } else if (message.type === 'newClientConnected' && isMaster) {
-            // A new slave connected after I became master
             addClientToList(message.clientId);
         } else if (message.type === 'clientDisconnected' && isMaster) {
-            // A slave disconnected
             removeClientFromList(message.clientId);
         }
     };
@@ -154,10 +146,7 @@ function connectWebSocket() {
         statusElement.textContent = 'Disconnected from server. Reconnecting...';
         console.log('WebSocket disconnected. Attempting to reconnect in 3 seconds...');
         isMaster = false;
-        masterControls.style.display = 'none';
-        slaveDisplay.style.display = 'block';
-        masterSecretInput.style.display = 'block';
-        becomeMasterBtn.style.display = 'block';
+        updateUIVisibility();
         displayAudioActivationPrompt();
         setTimeout(connectWebSocket, 3000);
     };
@@ -169,7 +158,7 @@ function connectWebSocket() {
 }
 
 
-// --- UI Management Functions (New & Updated) ---
+// --- UI Management Functions ---
 function updateUIVisibility() {
     if (isMaster) {
         masterControls.style.display = 'block';
@@ -186,13 +175,13 @@ function updateUIVisibility() {
 
 function addClientToList(clientId) {
     const listItem = document.createElement('li');
-    listItem.id = `client-${clientId}`; // Give the list item a unique ID
+    listItem.id = `client-${clientId}`;
 
     const clientLabel = document.createElement('span');
     clientLabel.textContent = `Device ${clientId.substring(0, 6)}...`;
     
     const trackSelect = document.createElement('select');
-    trackSelect.dataset.clientId = clientId; // Store the client ID on the select element
+    trackSelect.dataset.clientId = clientId;
     trackSelect.innerHTML = `
         <option value="">-- Assign Track --</option>
         <option value="track1.mp3">Track 1</option>
@@ -218,11 +207,9 @@ function removeClientFromList(clientId) {
 // --- Audio Functions ---
 async function loadAudio(url) {
     if (!audioContext || audioContext.state !== 'running') {
-        console.warn('AudioContext is not running or suspended. Cannot load audio until it is active.');
+        console.warn('AudioContext is not running or suspended.');
         playbackStatusSpan.textContent = 'Audio context suspended. Please click to enable.';
-        if (!isMaster) {
-            displayAudioActivationPrompt();
-        }
+        if (!isMaster) displayAudioActivationPrompt();
         return;
     }
     playbackStatusSpan.textContent = 'Loading audio...';
@@ -231,21 +218,19 @@ async function loadAudio(url) {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const arrayBuffer = await response.arrayBuffer();
         currentAudioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        playbackStatusSpan.textContent = `Audio loaded: ${assignedTrack || 'N/A'}`;
+        playbackStatusSpan.textContent = `Audio loaded: ${url.split('/').pop()}`;
         console.log(`Audio loaded from ${url}`);
     } catch (error) {
         console.error('Error loading or decoding audio:', error);
-        playbackStatusSpan.textContent = `Failed to load audio for ${assignedTrack || 'N/A'}. Check console.`;
+        playbackStatusSpan.textContent = `Failed to load audio. Check console.`;
     }
 }
 
 function playAudio(startTime) {
     if (!currentAudioBuffer || !audioContext || audioContext.state !== 'running') {
         console.warn(`Cannot play. Buffer: ${!!currentAudioBuffer}, Context: ${audioContext ? audioContext.state : 'null'}`);
-        playbackStatusSpan.textContent = 'Audio not ready or not enabled by user click.';
-        if (!isMaster) {
-            displayAudioActivationPrompt();
-        }
+        playbackStatusSpan.textContent = 'Audio not ready or not enabled.';
+        if (!isMaster) displayAudioActivationPrompt();
         return;
     }
     if (currentAudioSource) {
@@ -289,9 +274,23 @@ stopBtn.addEventListener('click', () => {
     }
 });
 
-// NEW: Event listener for the whole list container (replaces assignTrackBtn)
+// Listener for master assigning track to itself
+masterTrackSelect.addEventListener('change', async (event) => {
+    if (isMaster) {
+        const selectedTrack = event.target.value;
+        assignedTrack = selectedTrack; // Update the master's own assigned track
+        if (selectedTrack) {
+            console.log(`Master assigned self track: ${selectedTrack}`);
+            await loadAudio(`/audio/${selectedTrack}`);
+        } else {
+            currentAudioBuffer = null; // If "None" is selected, clear buffer
+            playbackStatusSpan.textContent = 'Ready';
+        }
+    }
+});
+
+// Listener for master assigning tracks to slaves
 slaveListContainer.addEventListener('change', (event) => {
-    // Check if the thing that changed was one of our track select dropdowns
     if (event.target.tagName === 'SELECT' && event.target.dataset.clientId) {
         const targetClientId = event.target.dataset.clientId;
         const trackName = event.target.value;
@@ -300,10 +299,7 @@ slaveListContainer.addEventListener('change', (event) => {
             console.log(`Assigning track ${trackName} to client ${targetClientId}`);
             ws.send(JSON.stringify({
                 type: 'assignTrackToClient',
-                payload: {
-                    targetClientId,
-                    trackName
-                }
+                payload: { targetClientId, trackName }
             }));
         }
     }

@@ -18,11 +18,21 @@
             <button id="playBtn">Play All</button>
             <button id="stopBtn">Stop All</button>
             
+            <div id="master-self-assign-container">
+                <label for="masterTrackSelect">Assign Track to Self:</label>
+                <select id="masterTrackSelect">
+                    <option value="">-- None --</option>
+                    <option value="track1.mp3">Track 1</option>
+                    <option value="track2.mp3">Track 2</option>
+                    <option value="guitar.mp3">Guitar</option>
+                    <option value="drums.mp3">Drums</option>
+                    <option value="bass.mp3">Bass</option>
+                </select>
+            </div>
+
             <h3>Connected Slaves:</h3>
             <ul id="slave-list-container">
                 </ul>
-
-            <p>Assigned Track for Self: <span id="masterAssignedTrack">N/A</span></p>
         </div>
 
         <div id="slave-display">

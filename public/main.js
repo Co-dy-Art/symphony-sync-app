@@ -133,11 +133,13 @@ function connectWebSocket() {
             becomeMasterBtn.style.display = isMaster ? 'none' : 'block';
             console.log(`Assigned role: ${isMaster ? 'Master' : 'Slave'}`);
         } else if (message.type === 'playbackCommand') {
-            // This now runs on ALL devices (Master and Slaves)
             console.log('Received playback command. Scheduling audio with 1 second delay.');
-            const delay = 1.0; // A fixed buffer to absorb network jitter
+            const delay = 1.0;
             const startTime = audioContext.currentTime + delay;
             playAudio(startTime);
+        } else if (message.type === 'stopCommand') {
+            console.log('Received stop command from server.');
+            stopAudio();
         } else if (message.type === 'assignTrack' && !isMaster) {
             slaveAssignedTrackSpan.textContent = message.trackName;
             assignedTrack = message.trackName;
@@ -231,17 +233,14 @@ function stopAudio() {
 playBtn.addEventListener('click', () => {
     if (isMaster && ws && ws.readyState === WebSocket.OPEN) {
         console.log('Master is requesting playback start...');
-        // Just send a simple request. The server will do the rest.
         ws.send(JSON.stringify({ type: 'requestPlayback' }));
     }
 });
 
 stopBtn.addEventListener('click', () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        // This command should also be broadcast via the server to be in sync
-        // For now, it stops locally. This can be a future improvement.
-        ws.send(JSON.stringify({ type: 'requestStop' })); // A potential new command
-        // stopAudio(); // Local stop might not be what's desired. Let server command it.
+    if (isMaster && ws && ws.readyState === WebSocket.OPEN) {
+        console.log('Master is requesting playback stop...');
+        ws.send(JSON.stringify({ type: 'requestStop' }));
     }
 });
 

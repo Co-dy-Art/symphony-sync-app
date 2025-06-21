@@ -78,14 +78,20 @@ wss.on('connection', function connection(ws) {
             // Master is requesting that playback starts for everyone
             if (msg.type === 'requestPlayback') {
                 console.log('Master requested playback. Broadcasting command to all clients...');
-                
-                // Create the command that will be sent to everyone
                 const playbackMsg = { type: 'playbackCommand' };
-
-                // Broadcast the command to EVERY client, including the master
                 wss.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                         client.send(JSON.stringify(playbackMsg));
+                    }
+                });
+
+            // Master is requesting that playback STOPS for everyone
+            } else if (msg.type === 'requestStop') {
+                console.log('Master requested stop. Broadcasting command to all clients...');
+                const stopMsg = { type: 'stopCommand' };
+                wss.clients.forEach(function each(client) {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify(stopMsg));
                     }
                 });
 

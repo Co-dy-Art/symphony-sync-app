@@ -1,4 +1,3 @@
-<!-- public/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,19 +13,15 @@
         <h1>Symphony Sync</h1>
         <p id="status">Connecting to server...</p>
 
-        <!-- NO specific audio activation message container here (managed by JS for feedback if needed) -->
-
         <div id="master-controls">
             <h2>Master Controls</h2>
             <button id="playBtn">Play All</button>
             <button id="stopBtn">Stop All</button>
-            <label for="trackSelect">Assign Track:</label>
-            <select id="trackSelect">
-                <option value="track1.mp3">Track 1</option>
-                <option value="track2.mp3">Track 2</option>
-                <!-- Add more tracks as needed -->
-            </select>
-            <button id="assignTrackBtn">Assign Selected Track</button>
+            
+            <h3>Connected Slaves:</h3>
+            <ul id="slave-list-container">
+                </ul>
+
             <p>Assigned Track for Self: <span id="masterAssignedTrack">N/A</span></p>
         </div>
 

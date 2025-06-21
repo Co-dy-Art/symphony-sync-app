@@ -5,12 +5,12 @@ const masterControls = document.getElementById('master-controls');
 const slaveDisplay = document.getElementById('slave-display');
 const playBtn = document.getElementById('playBtn');
 const stopBtn = document.getElementById('stopBtn');
-const trackSelect = document.getElementById('trackSelect');
-const assignTrackBtn = document.getElementById('assignTrackBtn');
 const masterAssignedTrackSpan = document.getElementById('masterAssignedTrack');
 const slaveAssignedTrackSpan = document.getElementById('slaveAssignedTrack');
 const playbackStatusSpan = document.getElementById('playbackStatus');
+const slaveListContainer = document.getElementById('slave-list-container'); // Get the new list container
 
+// Master Secret UI Elements
 const masterSecretInput = document.createElement('input');
 masterSecretInput.type = 'password';
 masterSecretInput.placeholder = 'Enter Master Secret';
@@ -24,7 +24,6 @@ slaveDisplay.prepend(becomeMasterBtn);
 slaveDisplay.prepend(masterSecretInput);
 
 let audioActivationMessageElement = null;
-
 let ws;
 let isMaster = false;
 let audioContext = null;
@@ -32,14 +31,16 @@ let currentAudioBuffer = null;
 let currentAudioSource = null;
 let assignedTrack = null;
 
+// --- Service Worker ---
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
-            .then(registration => console.log('Service Worker registered! Scope:', registration.scope))
+            .then(reg => console.log('Service Worker registered.', reg))
             .catch(err => console.error('Service Worker registration failed:', err));
     });
 }
 
+// --- AudioContext Activation ---
 function setupAudioContextActivation() {
     if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
         try {
@@ -97,6 +98,8 @@ function displayAudioActivationPrompt() {
 document.body.addEventListener('click', setupAudioContextActivation);
 document.body.addEventListener('touchstart', setupAudioContextActivation);
 
+
+// --- WebSocket Connection & Message Handling ---
 function connectWebSocket() {
     const wsUrl = window.location.protocol === 'https:' ? 'wss://' + window.location.host : 'ws://' + window.location.host;
     ws = new WebSocket(wsUrl);
@@ -118,20 +121,14 @@ function connectWebSocket() {
         if (message.type === 'role') {
             isMaster = (message.role === 'master');
             statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'} (${message.message || ''})`;
-            if (isMaster) {
-                masterControls.style.display = 'block';
-                slaveDisplay.style.display = 'none';
-                if (audioActivationMessageElement) {
-                    audioActivationMessageElement.style.display = 'none';
-                }
-            } else {
-                masterControls.style.display = 'none';
-                slaveDisplay.style.display = 'block';
-                displayAudioActivationPrompt();
+            updateUIVisibility();
+
+            if (isMaster && message.existingClients) {
+                // If I just became master, render the list of already connected slaves
+                slaveListContainer.innerHTML = ''; // Clear any old list items
+                message.existingClients.forEach(clientId => addClientToList(clientId));
             }
-            masterSecretInput.style.display = isMaster ? 'none' : 'block';
-            becomeMasterBtn.style.display = isMaster ? 'none' : 'block';
-            console.log(`Assigned role: ${isMaster ? 'Master' : 'Slave'}`);
+
         } else if (message.type === 'playbackCommand') {
             console.log('Received playback command. Scheduling audio with 1 second delay.');
             const delay = 1.0;
@@ -143,15 +140,13 @@ function connectWebSocket() {
         } else if (message.type === 'assignTrack' && !isMaster) {
             slaveAssignedTrackSpan.textContent = message.trackName;
             assignedTrack = message.trackName;
-            console.log(`Assigned track: ${assignedTrack}`);
-            if (assignedTrack) {
-                await loadAudio(`/audio/${assignedTrack}`);
-            }
-        } else if (message.type === 'masterStatusChange' && !isMaster) {
-            statusElement.textContent = `You are: Slave (${message.message || 'Master status changed'})`;
-            masterSecretInput.style.display = 'block';
-            becomeMasterBtn.style.display = 'block';
-            displayAudioActivationPrompt();
+            if (assignedTrack) await loadAudio(`/audio/${assignedTrack}`);
+        } else if (message.type === 'newClientConnected' && isMaster) {
+            // A new slave connected after I became master
+            addClientToList(message.clientId);
+        } else if (message.type === 'clientDisconnected' && isMaster) {
+            // A slave disconnected
+            removeClientFromList(message.clientId);
         }
     };
 
@@ -173,6 +168,54 @@ function connectWebSocket() {
     };
 }
 
+
+// --- UI Management Functions (New & Updated) ---
+function updateUIVisibility() {
+    if (isMaster) {
+        masterControls.style.display = 'block';
+        slaveDisplay.style.display = 'none';
+        if (audioActivationMessageElement) audioActivationMessageElement.style.display = 'none';
+    } else {
+        masterControls.style.display = 'none';
+        slaveDisplay.style.display = 'block';
+        displayAudioActivationPrompt();
+    }
+    masterSecretInput.style.display = isMaster ? 'none' : 'block';
+    becomeMasterBtn.style.display = isMaster ? 'none' : 'block';
+}
+
+function addClientToList(clientId) {
+    const listItem = document.createElement('li');
+    listItem.id = `client-${clientId}`; // Give the list item a unique ID
+
+    const clientLabel = document.createElement('span');
+    clientLabel.textContent = `Device ${clientId.substring(0, 6)}...`;
+    
+    const trackSelect = document.createElement('select');
+    trackSelect.dataset.clientId = clientId; // Store the client ID on the select element
+    trackSelect.innerHTML = `
+        <option value="">-- Assign Track --</option>
+        <option value="track1.mp3">Track 1</option>
+        <option value="track2.mp3">Track 2</option>
+        <option value="guitar.mp3">Guitar</option>
+        <option value="drums.mp3">Drums</option>
+        <option value="bass.mp3">Bass</option>
+    `;
+
+    listItem.appendChild(clientLabel);
+    listItem.appendChild(trackSelect);
+    slaveListContainer.appendChild(listItem);
+}
+
+function removeClientFromList(clientId) {
+    const listItem = document.getElementById(`client-${clientId}`);
+    if (listItem) {
+        listItem.remove();
+    }
+}
+
+
+// --- Audio Functions ---
 async function loadAudio(url) {
     if (!audioContext || audioContext.state !== 'running') {
         console.warn('AudioContext is not running or suspended. Cannot load audio until it is active.');
@@ -230,6 +273,8 @@ function stopAudio() {
     }
 }
 
+
+// --- Event Listeners ---
 playBtn.addEventListener('click', () => {
     if (isMaster && ws && ws.readyState === WebSocket.OPEN) {
         console.log('Master is requesting playback start...');
@@ -244,26 +289,30 @@ stopBtn.addEventListener('click', () => {
     }
 });
 
-assignTrackBtn.addEventListener('click', async () => {
-    const selectedTrack = trackSelect.value;
-    if (selectedTrack) {
-        assignedTrack = selectedTrack;
-        masterAssignedTrackSpan.textContent = selectedTrack;
-        console.log(`Master assigned self track: ${selectedTrack}`);
-        await loadAudio(`/audio/${selectedTrack}`);
-        if (ws && ws.readyState === WebSocket.OPEN) {
+// NEW: Event listener for the whole list container (replaces assignTrackBtn)
+slaveListContainer.addEventListener('change', (event) => {
+    // Check if the thing that changed was one of our track select dropdowns
+    if (event.target.tagName === 'SELECT' && event.target.dataset.clientId) {
+        const targetClientId = event.target.dataset.clientId;
+        const trackName = event.target.value;
+
+        if (trackName) {
+            console.log(`Assigning track ${trackName} to client ${targetClientId}`);
             ws.send(JSON.stringify({
-                type: 'masterAssignTrack',
-                trackName: selectedTrack
+                type: 'assignTrackToClient',
+                payload: {
+                    targetClientId,
+                    trackName
+                }
             }));
         }
     }
 });
 
 becomeMasterBtn.addEventListener('click', () => {
-    const secret = masterSecretInput.value;
-    if (secret) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const secret = masterSecretInput.value;
+        if (secret) {
             ws.send(JSON.stringify({ type: 'attemptMaster', secret: secret }));
             masterSecretInput.value = '';
         }
@@ -272,4 +321,6 @@ becomeMasterBtn.addEventListener('click', () => {
     }
 });
 
+
+// --- Initial Call ---
 connectWebSocket();

@@ -4,131 +4,95 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const crypto = require('crypto'); // Import crypto for generating unique IDs
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
+const MASTER_SECRET = "qwerty";
 
-// DEFINE YOUR MASTER SECRET HERE! CHANGE THIS TO A STRONG, UNIQUE CODE!
-const MASTER_SECRET = "qwerty"; // <<< IMPORTANT: CHANGE THIS!
-
-let masterClient = null; // To keep track of the master device's WebSocket connection
+let masterClient = null;
+const clients = new Map(); // Use a Map to store clients by their unique ID
 
 // Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
 wss.on('connection', function connection(ws) {
-    console.log('Client connected');
+    // Assign a unique ID to every connection
+    const clientId = crypto.randomUUID();
+    ws.id = clientId; // Attach the ID to the WebSocket object itself
+    clients.set(clientId, ws); // Store the client in the Map
+    console.log(`Client connected with ID: ${clientId}`);
 
-    // Initially, clients are considered slaves. They must explicitly request master role with secret.
     ws.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Connected. Enter secret to become Master.' }));
-    console.log('New client connected, initially assigned slave role.');
-
 
     ws.on('message', function incoming(message) {
         let msg;
-        try {
-            msg = JSON.parse(message);
-        } catch (e) {
-            console.error('Failed to parse message:', message, e);
-            return;
-        }
-        console.log('received message type:', msg.type);
+        try { msg = JSON.parse(message); } catch (e) { return; }
+        console.log(`received message type: ${msg.type} from client: ${ws.id}`);
 
-        // Handle client attempting to become master
         if (msg.type === 'attemptMaster') {
             if (msg.secret === MASTER_SECRET) {
-                if (masterClient && masterClient !== ws) {
-                    console.log('New client provided correct secret. Assigning as new master.');
-                    if (masterClient && masterClient.readyState === WebSocket.OPEN) {
-                         masterClient.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Master role taken by another client.' }));
-                    }
-                    masterClient = ws;
-                    ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are now the master!' }));
-                    wss.clients.forEach(function each(client) {
-                        if (client !== ws && client.readyState === WebSocket.OPEN) {
-                            client.send(JSON.stringify({ type: 'masterStatusChange', masterPresent: true }));
-                        }
-                    });
-
-                } else if (!masterClient) {
-                     console.log('New client provided correct secret. Assigning as master.');
-                     masterClient = ws;
-                     ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are now the master!' }));
-                     wss.clients.forEach(function each(client) {
-                        if (client !== ws && client.readyState === WebSocket.OPEN) {
-                            client.send(JSON.stringify({ type: 'masterStatusChange', masterPresent: true }));
-                        }
-                    });
-                } else if (masterClient === ws) {
-                    ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are already the master.' }));
+                console.log(`Client ${ws.id} is now the master.`);
+                if (masterClient && masterClient.id !== ws.id) {
+                    masterClient.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Master role taken by another client.' }));
                 }
-
+                masterClient = ws;
+                // Get a list of all OTHER clients to send to the new master
+                const otherClientIds = Array.from(clients.keys()).filter(id => id !== ws.id);
+                ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are now the master!', existingClients: otherClientIds }));
             } else {
-                ws.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Incorrect secret. You are a slave.' }));
-                console.log('Client attempted master role with incorrect secret.');
+                ws.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Incorrect secret.' }));
             }
             return;
         }
 
-        // Only the current master can send commands
         if (ws === masterClient) {
-            // Master is requesting that playback starts for everyone
             if (msg.type === 'requestPlayback') {
-                console.log('Master requested playback. Broadcasting command to all clients...');
                 const playbackMsg = { type: 'playbackCommand' };
-                wss.clients.forEach(function each(client) {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify(playbackMsg));
-                    }
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(playbackMsg));
                 });
-
-            // Master is requesting that playback STOPS for everyone
             } else if (msg.type === 'requestStop') {
-                console.log('Master requested stop. Broadcasting command to all clients...');
                 const stopMsg = { type: 'stopCommand' };
-                wss.clients.forEach(function each(client) {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify(stopMsg));
-                    }
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(stopMsg));
                 });
-
-            } else if (msg.type === 'masterAssignTrack') {
-                console.log('Master assigning track:', msg.trackName);
-                // Broadcast track assignment only to slaves
-                wss.clients.forEach(function each(client) {
-                    if (client !== masterClient && client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({ type: 'assignTrack', trackName: msg.trackName }));
-                    }
-                });
+            } else if (msg.type === 'assignTrackToClient') {
+                const { targetClientId, trackName } = msg.payload;
+                const targetClient = clients.get(targetClientId);
+                if (targetClient && targetClient.readyState === WebSocket.OPEN) {
+                    console.log(`Assigning track ${trackName} to client ${targetClientId}`);
+                    targetClient.send(JSON.stringify({ type: 'assignTrack', trackName: trackName }));
+                }
             }
         } else {
-            console.log('Non-master client tried to send command, ignored. Message type:', msg.type);
+            console.log(`Message from non-master client ${ws.id} ignored.`);
         }
     });
 
     ws.on('close', function close() {
-        console.log('Client disconnected');
-        if (ws === masterClient) {
-            console.log('Master disconnected. Master role is now vacant.');
-            masterClient = null; // Master disconnected
-            // Inform all clients that the master has disconnected
-            wss.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'masterStatusChange', masterPresent: false, message: 'Master disconnected. Role is now vacant.' }));
-                }
-            });
+        console.log(`Client disconnected: ${ws.id}`);
+        clients.delete(ws.id);
+        if (masterClient && masterClient.id === ws.id) {
+            console.log('Master disconnected.');
+            masterClient = null;
+        } else if (masterClient && masterClient.readyState === WebSocket.OPEN) {
+            // Notify the master that a slave has disconnected
+            masterClient.send(JSON.stringify({ type: 'clientDisconnected', clientId: ws.id }));
         }
     });
 
-    ws.on('error', function error(err) {
-        console.error('WebSocket error for client:', err.message);
-    });
+    ws.on('error', (err) => console.error(`WebSocket error for client ${ws.id}:`, err.message));
+
+    // After setting up listeners, if a master already exists, notify them of the new client
+    if (masterClient && masterClient.readyState === WebSocket.OPEN && masterClient.id !== ws.id) {
+        masterClient.send(JSON.stringify({ type: 'newClientConnected', clientId: ws.id }));
+    }
 });
 
 server.listen(PORT, () => {
     console.log(`Server listening on http://localhost:${PORT}`);
-    console.log('WebSocket server is running.');
 });

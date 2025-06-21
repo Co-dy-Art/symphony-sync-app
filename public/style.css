@@ -57,7 +57,6 @@ button:active {
     background-color: #003d80;
 }
 
-/* NEW: Style for disabled buttons */
 button:disabled {
     background-color: #cccccc;
     cursor: not-allowed;
@@ -104,16 +103,21 @@ select {
     border-bottom: 1px solid #f0f0f0;
 }
 
-/* NEW: Styles for the status indicator */
 .status-indicator {
     font-size: 24px;
     line-height: 1;
-    margin-right: 10px;
     color: #dc3545; /* Red for Not Ready */
 }
 
 .status-indicator.ready {
     color: #28a745; /* Green for Ready */
+}
+
+/* NEW: A container for the controls on the right side of the list item */
+.client-item-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px; /* Adds space between the dropdown and the new checkbox */
 }
 
 

@@ -98,9 +98,7 @@ document.body.addEventListener('touchstart', setupAudioContextActivation);
 function connectWebSocket() {
     const wsUrl = window.location.protocol === 'https:' ? 'wss://' + window.location.host : 'ws://' + window.location.host;
     ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-        statusElement.textContent = 'Connected to server. Waiting for role assignment...';
-    };
+    ws.onopen = () => { statusElement.textContent = 'Connected to server. Waiting for role assignment...'; };
 
     ws.onmessage = async (event) => {
         const message = JSON.parse(event.data);
@@ -115,7 +113,7 @@ function connectWebSocket() {
                 if (message.existingClients) {
                     message.existingClients.forEach(clientId => addClientToList(clientId));
                 }
-                checkAllClientsReady();
+                updatePlayButtonState();
             }
         } else if (message.type === 'playbackCommand') {
             const delay = 1.0;
@@ -129,13 +127,13 @@ function connectWebSocket() {
             if (assignedTrack) await loadAudio(`/audio/${assignedTrack}`);
         } else if (message.type === 'newClientConnected' && isMaster) {
             addClientToList(message.clientId);
-            checkAllClientsReady();
+            updatePlayButtonState();
         } else if (message.type === 'clientDisconnected' && isMaster) {
             removeClientFromList(message.clientId);
-            checkAllClientsReady();
+            updatePlayButtonState();
         } else if (message.type === 'clientStateUpdate' && isMaster) {
             updateClientState(message.clientId, message.isReady);
-            checkAllClientsReady();
+            updatePlayButtonState();
         }
     };
 
@@ -171,6 +169,7 @@ function updateUIVisibility() {
 function addClientToList(clientId) {
     const listItem = document.createElement('li');
     listItem.id = `client-${clientId}`;
+    listItem.dataset.clientId = clientId; // Store ID on the list item
     listItem.dataset.ready = "false";
 
     const statusIndicator = document.createElement('span');
@@ -181,13 +180,24 @@ function addClientToList(clientId) {
     const clientLabel = document.createElement('span');
     clientLabel.textContent = `Device ${clientId.substring(0, 6)}...`;
     
+    const controlsContainer = document.createElement('div');
+    controlsContainer.className = 'client-item-controls';
+
     const trackSelect = document.createElement('select');
-    trackSelect.dataset.clientId = clientId;
-    trackSelect.innerHTML = `<option value="">-- Assign Track --</option><option value="track1.mp3">Track 1</option><option value="track2.mp3">Track 2</option><option value="guitar.mp3">Guitar</option><option value="drums.mp3">Drums</option><option value="bass.mp3">Bass</option>`;
+    trackSelect.innerHTML = `<option value="">-- Assign --</option><option value="track1.mp3">Track 1</option><option value="track2.mp3">Track 2</option><option value="guitar.mp3">Guitar</option><option value="drums.mp3">Drums</option><option value="bass.mp3">Bass</option>`;
+    
+    const includeCheckbox = document.createElement('input');
+    includeCheckbox.type = 'checkbox';
+    includeCheckbox.className = 'include-checkbox';
+    includeCheckbox.checked = true; // Included by default
+    includeCheckbox.title = "Include in playback";
+
+    controlsContainer.appendChild(trackSelect);
+    controlsContainer.appendChild(includeCheckbox);
 
     listItem.appendChild(statusIndicator);
     listItem.appendChild(clientLabel);
-    listItem.appendChild(trackSelect);
+    listItem.appendChild(controlsContainer);
     slaveListContainer.appendChild(listItem);
 }
 
@@ -212,20 +222,21 @@ function updateClientState(clientId, isReady) {
     }
 }
 
-function checkAllClientsReady() {
+// Renamed from checkAllClientsReady
+function updatePlayButtonState() {
     if (!isMaster) return;
+
     const slaveItems = slaveListContainer.querySelectorAll('li');
-    let allReady = true;
-    if (slaveItems.length === 0) {
-        allReady = true;
-    } else {
-        slaveItems.forEach(item => {
-            if (item.dataset.ready !== "true") {
-                allReady = false;
-            }
-        });
-    }
-    playBtn.disabled = !allReady;
+    // Get only the items that are CHECKED for inclusion
+    const includedItems = Array.from(slaveItems).filter(item => {
+        const checkbox = item.querySelector('.include-checkbox');
+        return checkbox && checkbox.checked;
+    });
+
+    // Now, check if every single one of those included items is ready
+    const allIncludedAreReady = includedItems.every(item => item.dataset.ready === "true");
+    
+    playBtn.disabled = !allIncludedAreReady;
 }
 
 async function loadAudio(url) {
@@ -286,8 +297,17 @@ function stopAudio() {
 
 playBtn.addEventListener('click', () => {
     if (isMaster && ws && ws.readyState === WebSocket.OPEN) {
-        console.log('Master is requesting playback start...');
-        ws.send(JSON.stringify({ type: 'requestPlayback' }));
+        // Find all list items with a CHECKED checkbox
+        const includedItems = Array.from(slaveListContainer.querySelectorAll('li')).filter(item => {
+            const checkbox = item.querySelector('.include-checkbox');
+            return checkbox && checkbox.checked;
+        });
+
+        // Get the client IDs from those included items
+        const targetClientIds = includedItems.map(item => item.dataset.clientId);
+
+        console.log(`Master is requesting playback start for clients:`, targetClientIds);
+        ws.send(JSON.stringify({ type: 'requestPlayback', targetClientIds: targetClientIds }));
     }
 });
 
@@ -313,15 +333,28 @@ masterTrackSelect.addEventListener('change', async (event) => {
 });
 
 slaveListContainer.addEventListener('change', (event) => {
-    if (event.target.tagName === 'SELECT' && event.target.dataset.clientId) {
-        const targetClientId = event.target.dataset.clientId;
-        const trackName = event.target.value;
+    const target = event.target;
+    // Handle the checkbox being changed
+    if (target.classList.contains('include-checkbox')) {
+        updatePlayButtonState();
+    } 
+    // Handle the track selection dropdown being changed
+    else if (target.tagName === 'SELECT') {
+        const listItem = target.closest('li');
+        const targetClientId = listItem.dataset.clientId;
+        const trackName = target.value;
+
         if (trackName) {
             console.log(`Assigning track ${trackName} to client ${targetClientId}`);
             ws.send(JSON.stringify({
                 type: 'assignTrackToClient',
                 payload: { targetClientId, trackName }
             }));
+        }
+        // If an empty track is selected, the device is not ready
+        else {
+            updateClientState(targetClientId, false);
+            updatePlayButtonState();
         }
     }
 });

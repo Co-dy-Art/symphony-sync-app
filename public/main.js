@@ -29,7 +29,10 @@ let audioContext = null;
 let currentAudioBuffer = null;
 let currentAudioSource = null;
 let assignedTrack = null;
+let serverTimeOffset = 0;
+let screenWakeLock = null; // NEW: Variable to hold the screen wake lock
 
+// --- Service Worker ---
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
@@ -38,6 +41,29 @@ if ('serviceWorker' in navigator) {
     });
 }
 
+// --- NEW: Screen Wake Lock Function ---
+async function requestWakeLock() {
+    // Check if the API is supported
+    if ('wakeLock' in navigator) {
+        try {
+            // Request the wake lock
+            screenWakeLock = await navigator.wakeLock.request('screen');
+            console.log('Screen Wake Lock is active.');
+            // Listen for when the lock is released (e.g., user switches tabs)
+            screenWakeLock.addEventListener('release', () => {
+                console.log('Screen Wake Lock was released.');
+                screenWakeLock = null;
+            });
+        } catch (err) {
+            console.error(`Wake Lock failed: ${err.name}, ${err.message}`);
+        }
+    } else {
+        console.warn('Wake Lock API not supported in this browser.');
+    }
+}
+
+
+// --- AudioContext Activation (Updated) ---
 function setupAudioContextActivation() {
     if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
         try {
@@ -46,8 +72,9 @@ function setupAudioContextActivation() {
                 console.log('AudioContext initialized via user gesture listener.');
             }
             if (audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-                audioContext.resume().then(() => {
+                audioContext.resume().then(async () => { // made this async
                     console.log('AudioContext resumed successfully on user interaction.');
+                    await requestWakeLock(); // Request wake lock after successful interaction
                     document.body.removeEventListener('click', setupAudioContextActivation);
                     document.body.removeEventListener('touchstart', setupAudioContextActivation);
                     if (audioActivationMessageElement) {
@@ -59,6 +86,8 @@ function setupAudioContextActivation() {
                     displayAudioActivationPrompt();
                 });
             } else {
+                // Already running, so we can request the wake lock
+                requestWakeLock();
                 document.body.removeEventListener('click', setupAudioContextActivation);
                 document.body.removeEventListener('touchstart', setupAudioContextActivation);
                 if (audioActivationMessageElement) {
@@ -95,16 +124,40 @@ function displayAudioActivationPrompt() {
 document.body.addEventListener('click', setupAudioContextActivation);
 document.body.addEventListener('touchstart', setupAudioContextActivation);
 
+// NEW: Event listener to re-acquire wake lock when tab becomes visible again
+document.addEventListener('visibilitychange', async () => {
+    if (screenWakeLock === null && document.visibilityState === 'visible') {
+        console.log('Re-acquiring screen wake lock after tab visibility change.');
+        await requestWakeLock();
+    }
+});
+
+
+// --- WebSocket Connection & Message Handling ---
 function connectWebSocket() {
     const wsUrl = window.location.protocol === 'https:' ? 'wss://' + window.location.host : 'ws://' + window.location.host;
     ws = new WebSocket(wsUrl);
-    ws.onopen = () => { statusElement.textContent = 'Connected to server. Waiting for role assignment...'; };
+
+    ws.onopen = () => {
+        statusElement.textContent = 'Connected. Synchronizing time...';
+        syncTimeWithServer();
+    };
 
     ws.onmessage = async (event) => {
         const message = JSON.parse(event.data);
-        console.log('Message from server:', message);
+        
+        if (message.type !== 'timeSyncResponse') {
+            console.log('Message from server:', message);
+        }
 
-        if (message.type === 'role') {
+        if (message.type === 'timeSyncResponse') {
+            const roundTripTime = Date.now() - message.clientTime;
+            const estimatedServerTime = message.serverTime + (roundTripTime / 2);
+            serverTimeOffset = estimatedServerTime - Date.now();
+            statusElement.textContent = 'Connected to server.';
+            console.log(`Time synchronized. Server is approx. ${Math.abs(serverTimeOffset).toFixed(0)}ms ${serverTimeOffset > 0 ? 'ahead' : 'behind'}.`);
+
+        } else if (message.type === 'role') {
             isMaster = (message.role === 'master');
             statusElement.textContent = `You are: ${isMaster ? 'Master' : 'Slave'} (${message.message || ''})`;
             updateUIVisibility();
@@ -116,9 +169,18 @@ function connectWebSocket() {
                 updatePlayButtonState();
             }
         } else if (message.type === 'playbackCommand') {
-            const delay = 1.0;
-            const startTime = audioContext.currentTime + delay;
-            playAudio(startTime);
+            const targetServerTime = message.serverStartTime;
+            const timeUntilStart = targetServerTime - (Date.now() + serverTimeOffset);
+            
+            console.log(`Playback command received. Will start in ${timeUntilStart.toFixed(0)}ms.`);
+
+            if (timeUntilStart > 0) {
+                const localStartTime = audioContext.currentTime + (timeUntilStart / 1000);
+                playAudio(localStartTime);
+            } else {
+                console.warn('Playback command received too late. Discarding.');
+            }
+
         } else if (message.type === 'stopCommand') {
             stopAudio();
         } else if (message.type === 'assignTrack' && !isMaster) {
@@ -150,6 +212,15 @@ function connectWebSocket() {
         console.error('WebSocket error:', error);
         statusElement.textContent = 'WebSocket error. Check console.';
     };
+}
+
+function syncTimeWithServer() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'timeSync',
+            clientTime: Date.now()
+        }));
+    }
 }
 
 function updateUIVisibility() {
@@ -184,7 +255,6 @@ function addClientToList(clientId) {
     controlsContainer.className = 'client-item-controls';
 
     const trackSelect = document.createElement('select');
-    // Corrected track list
     trackSelect.innerHTML = `
         <option value="">-- Assign --</option>
         <option value="garageDrums.mp3">Garage Drums</option>
@@ -307,9 +377,7 @@ playBtn.addEventListener('click', () => {
             const checkbox = item.querySelector('.include-checkbox');
             return checkbox && checkbox.checked;
         });
-
         const targetClientIds = includedItems.map(item => item.dataset.clientId);
-
         console.log(`Master is requesting playback start for clients:`, targetClientIds);
         ws.send(JSON.stringify({ type: 'requestPlayback', targetClientIds: targetClientIds }));
     }
@@ -345,11 +413,8 @@ slaveListContainer.addEventListener('change', (event) => {
         const listItem = target.closest('li');
         const targetClientId = listItem.dataset.clientId;
         const trackName = target.value;
-
-        // When a track is assigned, the device becomes "not ready" until it reports back
         updateClientState(targetClientId, false);
         updatePlayButtonState();
-
         if (trackName) {
             console.log(`Assigning track ${trackName} to client ${targetClientId}`);
             ws.send(JSON.stringify({

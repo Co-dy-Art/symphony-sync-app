@@ -30,7 +30,20 @@ wss.on('connection', function connection(ws) {
     ws.on('message', function incoming(message) {
         let msg;
         try { msg = JSON.parse(message); } catch (e) { return; }
-        console.log(`received message type: ${msg.type} from client: ${ws.id}`);
+        // Don't log timeSync messages to avoid clutter
+        if (msg.type !== 'timeSync') {
+            console.log(`received message type: ${msg.type} from client: ${ws.id}`);
+        }
+
+        // --- Time Synchronization Handler ---
+        if (msg.type === 'timeSync') {
+            ws.send(JSON.stringify({
+                type: 'timeSyncResponse',
+                clientTime: msg.clientTime, // Echo back the client's original time
+                serverTime: Date.now()      // Add the server's current time
+            }));
+            return;
+        }
 
         if (msg.type === 'attemptMaster') {
             if (msg.secret === MASTER_SECRET) {
@@ -59,11 +72,14 @@ wss.on('connection', function connection(ws) {
 
         if (ws === masterClient) {
             if (msg.type === 'requestPlayback') {
-                const { targetClientIds } = msg; // Expect an array of IDs to play
+                const { targetClientIds } = msg;
                 console.log(`Master requested playback for ${targetClientIds.length} clients.`);
-                const playbackMsg = { type: 'playbackCommand' };
+                
+                // Set a start time 2 seconds in the future from the server's perspective
+                const serverStartTime = Date.now() + 2000;
+                
+                const playbackMsg = { type: 'playbackCommand', serverStartTime: serverStartTime };
 
-                // Send to all targeted slaves that master has selected
                 if (targetClientIds && Array.isArray(targetClientIds)) {
                     targetClientIds.forEach(clientId => {
                         const client = clients.get(clientId);
@@ -72,7 +88,6 @@ wss.on('connection', function connection(ws) {
                         }
                     });
                 }
-                // Also send the command to the master itself so it plays too
                 masterClient.send(JSON.stringify(playbackMsg));
 
             } else if (msg.type === 'requestStop') {
@@ -90,7 +105,6 @@ wss.on('connection', function connection(ws) {
                 }
 
                 if (targetClient && targetClient.readyState === WebSocket.OPEN) {
-                    console.log(`Assigning track ${trackName} to client ${targetClientId}`);
                     targetClient.send(JSON.stringify({ type: 'assignTrack', trackName: trackName }));
                 }
             }

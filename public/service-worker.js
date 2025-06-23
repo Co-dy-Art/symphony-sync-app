@@ -7,8 +7,13 @@ const ASSETS_TO_CACHE = [
     '/style.css',
     '/main.js',
     '/manifest.json',
-    '/audio/track1.mp3', // Make sure these paths match your audio files
-    '/audio/track2.mp3', // Add all your audio files here!
+    // Caching all audio files based on your directory listing
+    '/audio/garageDrums.mp3',
+    '/audio/keys.mp3',
+    '/audio/techBass.mp3',
+    '/audio/techDrums.mp3',
+    '/audio/track1.mp3',
+    '/audio/track2.mp3',
     // Add any necessary icons here if you've added them
     '/icons/icon-192x192.png',
     '/icons/icon-512x512.png'
@@ -20,7 +25,12 @@ self.addEventListener('install', (event) => {
         caches.open(CACHE_NAME)
             .then((cache) => {
                 console.log('[Service Worker] Caching all content');
-                return cache.addAll(ASSETS_TO_CACHE);
+                // Use {cache: "reload"} to ensure you get the latest version from the network upon install
+                return Promise.all(
+                    ASSETS_TO_CACHE.map(url => {
+                        return cache.add(new Request(url, {cache: 'reload'}));
+                    })
+                );
             })
             .catch(err => {
                 console.error('[Service Worker] Failed to cache:', err);
@@ -29,20 +39,14 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-    // console.log('[Service Worker] Fetching resource: ' + event.request.url);
     event.respondWith(
         caches.match(event.request)
             .then((response) => {
-                if (response) {
-                    // console.log('[Service Worker] Found in cache: ' + event.request.url);
-                    return response; // Return cached asset
-                }
-                // console.log('[Service Worker] Not in cache, fetching from network: ' + event.request.url);
-                return fetch(event.request); // Fetch from network if not in cache
+                // Return cached asset, or fetch from network if not in cache
+                return response || fetch(event.request);
             })
             .catch(err => {
                 console.error('[Service Worker] Fetch failed:', err);
-                // You could return an offline page here
             })
     );
 });
@@ -52,14 +56,12 @@ self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((keyList) => {
             return Promise.all(keyList.map((key) => {
-                if (key === CACHE_NAME) {
-                    return;
+                if (key !== CACHE_NAME) {
+                    console.log('[Service Worker] Deleting old cache: ' + key);
+                    return caches.delete(key);
                 }
-                console.log('[Service Worker] Deleting old cache: ' + key);
-                return caches.delete(key);
             }));
         })
     );
-    // This immediately takes control of the page once activated
     return self.clients.claim();
 });

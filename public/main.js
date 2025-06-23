@@ -1,5 +1,39 @@
 // public/main.js
 
+// --- ON-SCREEN LOGGING SETUP ---
+const logContainer = document.getElementById('log-container');
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
+function addLogMessage(message, className) {
+    if (logContainer) {
+        const p = document.createElement('p');
+        p.textContent = `> ${message}`;
+        if (className) p.className = className;
+        logContainer.appendChild(p);
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+}
+
+console.log = function(...args) {
+    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+    addLogMessage(message, 'log-info');
+    originalConsoleLog.apply(console, args);
+};
+console.error = function(...args) {
+    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+    addLogMessage(`ERROR: ${message}`, 'log-error');
+    originalConsoleError.apply(console, args);
+};
+console.warn = function(...args) {
+    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+    addLogMessage(`WARN: ${message}`, 'log-warn');
+    originalConsoleWarn.apply(console, args);
+};
+// --- END ON-SCREEN LOGGING SETUP ---
+
+
 const statusElement = document.getElementById('status');
 const masterControls = document.getElementById('master-controls');
 const slaveDisplay = document.getElementById('slave-display');
@@ -30,9 +64,8 @@ let currentAudioBuffer = null;
 let currentAudioSource = null;
 let assignedTrack = null;
 let serverTimeOffset = 0;
-let screenWakeLock = null; // NEW: Variable to hold the screen wake lock
+let screenWakeLock = null;
 
-// --- Service Worker ---
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
@@ -41,15 +74,11 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-// --- NEW: Screen Wake Lock Function ---
 async function requestWakeLock() {
-    // Check if the API is supported
     if ('wakeLock' in navigator) {
         try {
-            // Request the wake lock
             screenWakeLock = await navigator.wakeLock.request('screen');
             console.log('Screen Wake Lock is active.');
-            // Listen for when the lock is released (e.g., user switches tabs)
             screenWakeLock.addEventListener('release', () => {
                 console.log('Screen Wake Lock was released.');
                 screenWakeLock = null;
@@ -62,8 +91,6 @@ async function requestWakeLock() {
     }
 }
 
-
-// --- AudioContext Activation (Updated) ---
 function setupAudioContextActivation() {
     if (!audioContext || audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
         try {
@@ -72,9 +99,9 @@ function setupAudioContextActivation() {
                 console.log('AudioContext initialized via user gesture listener.');
             }
             if (audioContext.state === 'suspended' || audioContext.state === 'interrupted') {
-                audioContext.resume().then(async () => { // made this async
+                audioContext.resume().then(async () => {
                     console.log('AudioContext resumed successfully on user interaction.');
-                    await requestWakeLock(); // Request wake lock after successful interaction
+                    await requestWakeLock();
                     document.body.removeEventListener('click', setupAudioContextActivation);
                     document.body.removeEventListener('touchstart', setupAudioContextActivation);
                     if (audioActivationMessageElement) {
@@ -86,7 +113,6 @@ function setupAudioContextActivation() {
                     displayAudioActivationPrompt();
                 });
             } else {
-                // Already running, so we can request the wake lock
                 requestWakeLock();
                 document.body.removeEventListener('click', setupAudioContextActivation);
                 document.body.removeEventListener('touchstart', setupAudioContextActivation);
@@ -124,7 +150,6 @@ function displayAudioActivationPrompt() {
 document.body.addEventListener('click', setupAudioContextActivation);
 document.body.addEventListener('touchstart', setupAudioContextActivation);
 
-// NEW: Event listener to re-acquire wake lock when tab becomes visible again
 document.addEventListener('visibilitychange', async () => {
     if (screenWakeLock === null && document.visibilityState === 'visible') {
         console.log('Re-acquiring screen wake lock after tab visibility change.');
@@ -132,8 +157,6 @@ document.addEventListener('visibilitychange', async () => {
     }
 });
 
-
-// --- WebSocket Connection & Message Handling ---
 function connectWebSocket() {
     const wsUrl = window.location.protocol === 'https:' ? 'wss://' + window.location.host : 'ws://' + window.location.host;
     ws = new WebSocket(wsUrl);
@@ -303,15 +326,12 @@ function updateClientState(clientId, isReady) {
 
 function updatePlayButtonState() {
     if (!isMaster) return;
-
     const slaveItems = slaveListContainer.querySelectorAll('li');
     const includedItems = Array.from(slaveItems).filter(item => {
         const checkbox = item.querySelector('.include-checkbox');
         return checkbox && checkbox.checked;
     });
-
     const allIncludedAreReady = includedItems.every(item => item.dataset.ready === "true");
-    
     playBtn.disabled = !allIncludedAreReady;
 }
 

@@ -15,7 +15,7 @@ const MASTER_SECRET = "qwerty";
 
 let masterClient = null;
 const clients = new Map();
-const readyClients = new Set(); // NEW: Set to store IDs of ready clients
+const readyClients = new Set();
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -32,7 +32,6 @@ wss.on('connection', function connection(ws) {
         try { msg = JSON.parse(message); } catch (e) { return; }
         console.log(`received message type: ${msg.type} from client: ${ws.id}`);
 
-        // Handle master authentication
         if (msg.type === 'attemptMaster') {
             if (msg.secret === MASTER_SECRET) {
                 console.log(`Client ${ws.id} is now the master.`);
@@ -40,7 +39,7 @@ wss.on('connection', function connection(ws) {
                     masterClient.send(JSON.stringify({ type: 'role', role: 'slave', message: 'Master role taken by another client.' }));
                 }
                 masterClient = ws;
-                readyClients.clear(); // Clear ready states when a new master takes over
+                readyClients.clear();
                 const otherClientIds = Array.from(clients.keys()).filter(id => id !== ws.id);
                 ws.send(JSON.stringify({ type: 'role', role: 'master', message: 'You are now the master!', existingClients: otherClientIds }));
             } else {
@@ -49,7 +48,6 @@ wss.on('connection', function connection(ws) {
             return;
         }
 
-        // Handle a client reporting it's ready
         if (msg.type === 'clientReady') {
             console.log(`Client ${ws.id} reported it is ready.`);
             readyClients.add(ws.id);
@@ -59,13 +57,24 @@ wss.on('connection', function connection(ws) {
             return;
         }
 
-        // Handle commands from the master
         if (ws === masterClient) {
             if (msg.type === 'requestPlayback') {
+                const { targetClientIds } = msg; // Expect an array of IDs to play
+                console.log(`Master requested playback for ${targetClientIds.length} clients.`);
                 const playbackMsg = { type: 'playbackCommand' };
-                wss.clients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(playbackMsg));
-                });
+
+                // Send to all targeted slaves that master has selected
+                if (targetClientIds && Array.isArray(targetClientIds)) {
+                    targetClientIds.forEach(clientId => {
+                        const client = clients.get(clientId);
+                        if (client && client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify(playbackMsg));
+                        }
+                    });
+                }
+                // Also send the command to the master itself so it plays too
+                masterClient.send(JSON.stringify(playbackMsg));
+
             } else if (msg.type === 'requestStop') {
                 const stopMsg = { type: 'stopCommand' };
                 wss.clients.forEach(client => {
@@ -75,9 +84,10 @@ wss.on('connection', function connection(ws) {
                 const { targetClientId, trackName } = msg.payload;
                 const targetClient = clients.get(targetClientId);
                 
-                // When a track is assigned, that client is no longer ready
                 readyClients.delete(targetClientId);
-                masterClient.send(JSON.stringify({ type: 'clientStateUpdate', clientId: targetClientId, isReady: false }));
+                if (masterClient && masterClient.readyState === WebSocket.OPEN) {
+                    masterClient.send(JSON.stringify({ type: 'clientStateUpdate', clientId: targetClientId, isReady: false }));
+                }
 
                 if (targetClient && targetClient.readyState === WebSocket.OPEN) {
                     console.log(`Assigning track ${trackName} to client ${targetClientId}`);
@@ -90,7 +100,7 @@ wss.on('connection', function connection(ws) {
     ws.on('close', function close() {
         console.log(`Client disconnected: ${ws.id}`);
         clients.delete(ws.id);
-        readyClients.delete(ws.id); // Remove from ready set on disconnect
+        readyClients.delete(ws.id);
         if (masterClient && masterClient.id === ws.id) {
             console.log('Master disconnected.');
             masterClient = null;
